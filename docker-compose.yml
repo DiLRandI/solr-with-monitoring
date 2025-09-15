@@ -1,18 +1,40 @@
 version: '3.8'
 
 services:
+  # ZooKeeper (single node). For HA, use a 3-node ensemble in production.
+  zookeeper:
+    image: zookeeper:3.8
+    container_name: zookeeper
+    restart: unless-stopped
+    ports:
+      - "2181:2181"
+    networks:
+      - solr
+    volumes:
+      - zk_data:/data
+      - zk_datalog:/datalog
+
+  # Solr nodes in SolrCloud mode (connect to ZooKeeper)
   solr-master:
     build: ./solr
     container_name: solr-master
+    restart: unless-stopped
     ports:
-      - "8986:8983"
-      - "9102:9100"
-      - "9985:9983"
-    volumes:
-      - ./solr/data/master:/var/solr/data
+      - "8986:8983"  # Admin UI/API
     environment:
-      - SOLR_HEAP=512m
-    command: ["solr-precreate", "movies", "/opt/solr/server/solr/configsets/_template"]
+      - SOLR_HEAP=1g
+      # GC logs (Java 17+, Solr defaults to G1 GC)
+      - GC_LOG_OPTS=-Xlog:gc*:file=/var/solr/logs/gc.log:time,uptime,level,tags:filecount=10,filesize=32M
+    command: >
+      bash -lc "solr -f -cloud -z zookeeper:2181 -s /var/solr"
+    depends_on:
+      - zookeeper
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - solr_master_data:/var/solr
     networks:
       - solr
       - monitoring
@@ -20,17 +42,22 @@ services:
   solr-slave1:
     build: ./solr
     container_name: solr-slave1
+    restart: unless-stopped
     ports:
       - "8987:8983"
-      - "9103:9100"
-      - "9986:9983"
-    volumes:
-      - ./solr/data/slave1:/var/solr/data
     environment:
-      - SOLR_HEAP=512m
+      - SOLR_HEAP=1g
+      - GC_LOG_OPTS=-Xlog:gc*:file=/var/solr/logs/gc.log:time,uptime,level,tags:filecount=10,filesize=32M
+    command: >
+      bash -lc "solr -f -cloud -z zookeeper:2181 -s /var/solr"
     depends_on:
-      - solr-master
-    command: ["solr-precreate", "users", "/opt/solr/server/solr/configsets/_template"]
+      - zookeeper
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - solr_slave1_data:/var/solr
     networks:
       - solr
       - monitoring
@@ -38,24 +65,93 @@ services:
   solr-slave2:
     build: ./solr
     container_name: solr-slave2
+    restart: unless-stopped
     ports:
       - "8988:8983"
-      - "9101:9100"
-      - "9984:9983"
-    volumes:
-      - ./solr/data/slave2:/var/solr/data
     environment:
-      - SOLR_HEAP=512m
+      - SOLR_HEAP=1g
+      - GC_LOG_OPTS=-Xlog:gc*:file=/var/solr/logs/gc.log:time,uptime,level,tags:filecount=10,filesize=32M
+    command: >
+      bash -lc "solr -f -cloud -z zookeeper:2181 -s /var/solr"
     depends_on:
-      - solr-master
-    command: ["solr-precreate", "users", "/opt/solr/server/solr/configsets/_template"]
+      - zookeeper
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - solr_slave2_data:/var/solr
     networks:
       - solr
       - monitoring
 
+  # Solr Prometheus exporters (one per Solr node)
+  solr-master-exporter:
+    image: solr:9.9.0
+    container_name: solr-master-exporter
+    restart: unless-stopped
+    command: >
+      bash -lc "bin/solr-exporter -p 9983 -b http://solr-master:8983/solr -f /opt/solr/contrib/prometheus-exporter/conf/solr-exporter-config.xml"
+    depends_on:
+      - solr-master
+    networks:
+      - solr
+      - monitoring
+
+  solr-slave1-exporter:
+    image: solr:9.9.0
+    container_name: solr-slave1-exporter
+    restart: unless-stopped
+    command: >
+      bash -lc "bin/solr-exporter -p 9983 -b http://solr-slave1:8983/solr -f /opt/solr/contrib/prometheus-exporter/conf/solr-exporter-config.xml"
+    depends_on:
+      - solr-slave1
+    networks:
+      - solr
+      - monitoring
+
+  solr-slave2-exporter:
+    image: solr:9.9.0
+    container_name: solr-slave2-exporter
+    restart: unless-stopped
+    command: >
+      bash -lc "bin/solr-exporter -p 9983 -b http://solr-slave2:8983/solr -f /opt/solr/contrib/prometheus-exporter/conf/solr-exporter-config.xml"
+    depends_on:
+      - solr-slave2
+    networks:
+      - solr
+      - monitoring
+
+  solr-config-uploader:
+    build: ./solr
+    container_name: solr-config-uploader
+    restart: "no"
+    depends_on:
+      - zookeeper
+    networks:
+      - solr
+    command: >
+      bash -lc 'set -e; echo "Uploading configsets to ZooKeeper..."; bin/solr zk upconfig -n movies -d /opt/solr/server/solr/configsets/movies/conf -z zookeeper:2181; bin/solr zk upconfig -n users -d /opt/solr/server/solr/configsets/users/conf -z zookeeper:2181; echo "Configsets uploaded.";'
+
+  # One-off init job to create collections (movies, users) using provided configsets
+  solr-init:
+    image: curlimages/curl:8.10.1
+    container_name: solr-init
+    depends_on:
+      - solr-master
+      - solr-slave1
+      - solr-slave2
+      - solr-config-uploader
+    networks:
+      - solr
+    # Wait for Solr to be up, then create collections in SolrCloud using the copied configsets ("movies", "users")
+    command: >
+      sh -lc 'set -e; echo "Waiting for Solr to be ready..."; until curl -sSf "http://solr-master:8983/solr/admin/collections?action=CLUSTERSTATUS&wt=json" >/dev/null; do sleep 3; done; echo "Creating collections if not exist..."; list=$$(curl -s "http://solr-master:8983/solr/admin/collections?action=LIST&wt=json"); create_if_missing() { name="$$1"; config="$$2"; shards="$$3"; rf="$$4"; case "$$list" in *"\"$${name}\""*) echo "Collection $${name} already exists";; *) curl -sS "http://solr-master:8983/solr/admin/collections?action=CREATE&name=$${name}&collection.configName=$${config}&numShards=$${shards}&replicationFactor=$${rf}&maxShardsPerNode=2&wt=json" && echo "Created collection $${name}";; esac; }; create_if_missing movies movies 2 2; create_if_missing users users 2 2; echo "Done."'
+
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
+    restart: unless-stopped
     ports:
       - "9090:9090"
     volumes:
@@ -74,6 +170,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
+    restart: unless-stopped
     ports:
       - "3000:3000"
     volumes:
@@ -82,6 +179,8 @@ services:
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
     networks:
       - monitoring
     depends_on:
@@ -90,6 +189,7 @@ services:
   nginx:
     image: nginx:alpine
     container_name: nginx
+    restart: unless-stopped
     ports:
       - "80:80"
     volumes:
@@ -101,8 +201,13 @@ services:
       - monitoring
 
 volumes:
+  zk_data:
+  zk_datalog:
   prometheus_data:
   grafana_data:
+  solr_master_data:
+  solr_slave1_data:
+  solr_slave2_data:
 
 networks:
   monitoring:
