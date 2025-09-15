@@ -1,0 +1,111 @@
+version: '3.8'
+
+services:
+  solr-master:
+    build: ./solr
+    container_name: solr-master
+    ports:
+      - "8986:8983"
+      - "9102:9100"
+      - "9985:9983"
+    volumes:
+      - ./solr/data/master:/var/solr/data
+    environment:
+      - SOLR_HEAP=512m
+    command: ["solr-precreate", "movies", "/opt/solr/server/solr/configsets/_template"]
+    networks:
+      - solr
+      - monitoring
+
+  solr-slave1:
+    build: ./solr
+    container_name: solr-slave1
+    ports:
+      - "8987:8983"
+      - "9103:9100"
+      - "9986:9983"
+    volumes:
+      - ./solr/data/slave1:/var/solr/data
+    environment:
+      - SOLR_HEAP=512m
+    depends_on:
+      - solr-master
+    command: ["solr-precreate", "users", "/opt/solr/server/solr/configsets/_template"]
+    networks:
+      - solr
+      - monitoring
+
+  solr-slave2:
+    build: ./solr
+    container_name: solr-slave2
+    ports:
+      - "8988:8983"
+      - "9101:9100"
+      - "9984:9983"
+    volumes:
+      - ./solr/data/slave2:/var/solr/data
+    environment:
+      - SOLR_HEAP=512m
+    depends_on:
+      - solr-master
+    command: ["solr-precreate", "users", "/opt/solr/server/solr/configsets/_template"]
+    networks:
+      - solr
+      - monitoring
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - monitoring
+    depends_on:
+      - prometheus
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - grafana
+    networks:
+      - monitoring
+
+volumes:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  monitoring:
+    driver: bridge
+  solr:
+    driver: bridge

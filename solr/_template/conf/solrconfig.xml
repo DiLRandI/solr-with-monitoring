@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+ Licensed to the Apache Software Foundation (ASF) under one or more
+ contributor license agreements.  See the NOTICE file distributed with
+ this work for additional information regarding copyright ownership.
+ The ASF licenses this file to You under the Apache License, Version 2.0
+ (the "License"); you may not use this file except in compliance with
+ the License.  You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+
+<config>
+  <!-- In all configuration below, a prefix of "solr." for class names
+       is an alias that causes solr to search appropriate packages,
+       including org.apache.solr.(search|update|request|core|analysis)
+
+       You may also specify a fully qualified Java classname if you
+       have your own custom plugins.
+    -->
+
+  <!-- Controls what version of Lucene various components of Solr
+       adhere to.  Generally, you want to use the latest version to
+       get all bug fixes and improvements. It is highly recommended
+       that you fully re-index after changing this setting as it can
+       affect both how text is indexed and queried.
+  -->
+  <luceneMatchVersion>9.0.0</luceneMatchVersion>
+
+  <!-- <lib/> directives can be used to instruct Solr to load any Jars
+       identified and use them to resolve any "plugins" specified in
+       your solrconfig.xml or schema.xml (ie: Analyzers, Request
+       Handlers, etc...).
+
+       All directories and paths are resolved relative to the
+       instanceDir.
+
+       Please note that <lib/> directives are processed in the order
+       that they appear in your solrconfig.xml file, and are "stacked"
+       on top of each other when building a ClassLoader - so if you have
+       plugin jars with dependencies on other jars, the "lower level"
+       dependency jars should be loaded first.
+    -->
+  <lib dir="${solr.install.dir:../../../..}/contrib/extraction/lib" regex=".*\.jar" />
+  <lib dir="${solr.install.dir:../../../..}/dist/" regex="solr-cell-\d.*\.jar" />
+
+  <lib dir="${solr.install.dir:../../../..}/contrib/clustering/lib" regex=".*\.jar" />
+  <lib dir="${solr.install.dir:../../../..}/dist/" regex="solr-clustering-\d.*\.jar" />
+
+  <lib dir="${solr.install.dir:../../../..}/contrib/langid/lib" regex=".*\.jar" />
+  <lib dir="${solr.install.dir:../../../..}/dist/" regex="solr-langid-\d.*\.jar" />
+
+  <lib dir="${solr.install.dir:../../../..}/contrib/velocity/lib" regex=".*\.jar" />
+  <lib dir="${solr.install.dir:../../../..}/dist/" regex="solr-velocity-\d.*\.jar" />
+
+  <!-- If a dir called 'lib' exists in the Solr instanceDir, all files
+       ending in .jar should be loaded.  This is the case for single-core
+       installations using legacy (non-named) config sets.
+    -->
+  <lib dir="${solr.install.dir:../../../..}/lib" regex=".*\.jar" />
+
+  <dataDir>${solr.data.dir:}</dataDir>
+
+  <!-- The DirectoryFactory to use for indexes.
+       solr.StandardDirectoryFactory is filesystem based and tries to pick
+       the best implementation for the current JVM and platform.  solr.NRTCachingDirectoryFactory,
+       solr.MMapDirectoryFactory, and solr.RAMDirectoryFactory are memory based.
+
+       solr.RAMDirectoryFactory is NOT robust and should not be used in production.
+    -->
+  <directoryFactory name="DirectoryFactory"
+                    class="${solr.directoryFactory:solr.NRTCachingDirectoryFactory}"/>
+
+  <!-- The CodecFactory for defining the format of the inverted index.
+       The default implementation is optimized for use with the BlockCache.
+   -->
+  <codecFactory class="solr.SchemaCodecFactory"/>
+
+  <!-- To enable dynamic schema REST APIs, use the following for <schemaFactory>:
+
+       <schemaFactory class="ManagedIndexSchemaFactory">
+         <bool name="mutable">true</bool>
+         <str name="managedSchemaResourceName">managed-schema</str>
+       </schemaFactory>
+
+       When ManagedIndexSchemaFactory is specified, Solr will load the schema from
+       the resource named in 'managedSchemaResourceName', rather than from schema.xml.
+       Note that the managed schema resource CANNOT be named schema.xml.  If the managed
+       schema does not exist, Solr will create it by loading schema.xml, then rename
+       schema.xml to schema.xml.bak.
+
+       Do NOT hand edit the managed schema - external modifications will be ignored and
+       overwritten as a result of schema modification REST API calls.
+
+       When ManagedIndexSchemaFactory is specified with mutable = true, schema
+       modification REST API calls will be allowed; otherwise, error responses will be
+       sent back for those requests.
+    -->
+  <schemaFactory class="ClassicIndexSchemaFactory"/>
+
+  <!-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+       Index Config - These settings control low-level behavior of indexing
+       Most example settings here show the default value, but are commented
+       out, to more easily see where customizations have been made.
+
+       Note: You will notice that most changes will not take affect until a 'commit' or 'optimize' has been sent.
+       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ -->
+  <indexConfig>
+    <!-- maxFieldLength was removed in 4.0. To get similar behavior, include a
+         LimitTokenCountFilterFactory in your fieldType definition. E.g.
+     <filter class="solr.LimitTokenCountFilterFactory" maxTokenCount="10000"/>
+      -->
+    <!-- Maximum time to wait for a write lock (defaults to 1000) for an IndexWriter. -->
+    <writeLockTimeout>1000</writeLockTimeout>
+
+    <!-- Expert: Expert Internal Use Only.
+         Store a version of each document to be indexed as a byte array
+         when ramBufferSizeMB is exceeded instead of spooling to disk first. -->
+    <ramPerThreadHardLimitMB>19456</ramPerThreadHardLimitMB>
+
+    <!-- Expert: Maximum memory used by a single segment before forcing a flush.
+         Default is 2GB. Set to 0 to prevent any forced flushing due to RAM.
+         This parameter pre-allocates a pool called UninvertedField,
+         which is used to do per-segment uninversion to prevent loading all
+         fields of all documents into RAM during searches. -->
+    <maxBufferedDocs>1000</maxBufferedDocs>
+
+    <!-- Expert: Maximum memory used by a single segment before forcing a flush.
+         Default is 2GB. This parameter pre-allocates a pool called UninvertedField,
+         which is used to do per-segment uninversion to prevent loading all
+         fields of all documents into RAM during searches. -->
+    <ramBufferSizeMB>100</ramBufferSizeMB>
+
+    <!-- Expert: The maximum number of deleted documents to retain in the index.
+         This is used to ensure a consistent reading view when writing. Default is 2147483647 (Integer.MAX_VALUE). -->
+    <maxMergeDocs>2147483647</maxMergeDocs>
+
+    <!-- Expert: The maximum number of segments that may be merged at one time.
+         Default is 10. -->
+    <maxMergeAtOnce>10</maxMergeAtOnce>
+
+    <!-- Expert: The maximum number of segments that may be merged at one time using an optimize.
+         Default is 30. -->
+    <maxMergeAtOnceOptimize>10</maxMergeAtOnceOptimize>
+
+    <!-- Expert: Controls the amount of FuzzyQuery similarity when finding merges.
+         Default is 0.0. -->
+    <mergeFactor>10</mergeFactor>
+
+    <!-- Normalizes term and phrase queries so that no individual query
+         term/ phrase will exceed this limit in bytes. -->
+    <maxClauseCount>1024</maxClauseCount>
+
+    <!-- If a merge would exceed this value, it will be aborted and the commit will succeed.
+         Default is 2GB. -->
+    <mergeMaxMergeCount>10</mergeMaxMergeCount>
+  </indexConfig>
+
+  <!-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+       Update Config - These settings control low-level behavior of updates
+       Most example settings here show the default value, but are commented
+       out, to more easily see where customizations have been made.
+       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ -->
+  <updateConfig>
+    <!-- Maximum time to wait for a write lock (defaults to 1000) for an UpdateHandler. -->
+    <writeLockTimeout>1000</writeLockTimeout>
+  </updateConfig>
+
+  <!-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+       Query Config - These settings control low-level behavior of queries
+       Most example settings here show the default value, but are commented
+       out, to more easily see where customizations have been made.
+       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ -->
+  <queryConfig>
+    <!-- Maximum time to wait for a query lock (defaults to 1000) for a QueryHandler. -->
+    <queryLockTimeout>1000</queryLockTimeout>
+  </queryConfig>
+
+  <!-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+       Request Handler Config - These settings control the behavior of request handlers
+       Most example settings here show the default value, but are commented
+       out, to more easily see where customizations have been made.
+       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ -->
+  <requestHandler name="/select" class="solr.SearchHandler">
+    <lst name="defaults">
+      <str name="echoParams">explicit</str>
+      <int name="rows">10</int>
+    </lst>
+  </requestHandler>
+
+  <requestHandler name="/update" class="solr.UpdateRequestHandler">
+  </requestHandler>
+
+  <requestHandler name="/admin/ping" class="solr.PingRequestHandler">
+    <lst name="invariants">
+      <str name="q">solrpingquery</str>
+    </lst>
+    <lst name="defaults">
+      <str name="echoParams">all</str>
+    </lst>
+  </requestHandler>
+
+</config>
