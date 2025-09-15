@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   # ZooKeeper (single node). For HA, use a 3-node ensemble in production.
@@ -8,11 +8,14 @@ services:
     restart: unless-stopped
     ports:
       - "2181:2181"
+      - "7000:7000" # Prometheus metrics port
     networks:
       - solr
+      - monitoring
     volumes:
       - zk_data:/data
       - zk_datalog:/datalog
+      - ./zookeeper/conf/zoo.cfg:/conf/zoo.cfg
 
   # Solr nodes in SolrCloud mode (connect to ZooKeeper)
   solr-master:
@@ -20,13 +23,12 @@ services:
     container_name: solr-master
     restart: unless-stopped
     ports:
-      - "8986:8983"  # Admin UI/API
+      - "8986:8983" # Admin UI/API
+      - "9991:9983" # Exporter metrics (temporary)
     environment:
       - SOLR_HEAP=1g
       # GC logs (Java 17+, Solr defaults to G1 GC)
       - GC_LOG_OPTS=-Xlog:gc*:file=/var/solr/logs/gc.log:time,uptime,level,tags:filecount=10,filesize=32M
-    command: >
-      bash -lc "solr -f -cloud -z zookeeper:2181 -s /var/solr"
     depends_on:
       - zookeeper
     ulimits:
@@ -45,11 +47,10 @@ services:
     restart: unless-stopped
     ports:
       - "8987:8983"
+      - "9992:9983" # Exporter metrics (temporary)
     environment:
       - SOLR_HEAP=1g
       - GC_LOG_OPTS=-Xlog:gc*:file=/var/solr/logs/gc.log:time,uptime,level,tags:filecount=10,filesize=32M
-    command: >
-      bash -lc "solr -f -cloud -z zookeeper:2181 -s /var/solr"
     depends_on:
       - zookeeper
     ulimits:
@@ -68,11 +69,10 @@ services:
     restart: unless-stopped
     ports:
       - "8988:8983"
+      - "9993:9983" # Exporter metrics (temporary)
     environment:
       - SOLR_HEAP=1g
       - GC_LOG_OPTS=-Xlog:gc*:file=/var/solr/logs/gc.log:time,uptime,level,tags:filecount=10,filesize=32M
-    command: >
-      bash -lc "solr -f -cloud -z zookeeper:2181 -s /var/solr"
     depends_on:
       - zookeeper
     ulimits:
@@ -85,42 +85,6 @@ services:
       - solr
       - monitoring
 
-  # Solr Prometheus exporters (one per Solr node)
-  solr-master-exporter:
-    image: solr:9.9.0
-    container_name: solr-master-exporter
-    restart: unless-stopped
-    command: >
-      bash -lc "bin/solr-exporter -p 9983 -b http://solr-master:8983/solr -f /opt/solr/contrib/prometheus-exporter/conf/solr-exporter-config.xml"
-    depends_on:
-      - solr-master
-    networks:
-      - solr
-      - monitoring
-
-  solr-slave1-exporter:
-    image: solr:9.9.0
-    container_name: solr-slave1-exporter
-    restart: unless-stopped
-    command: >
-      bash -lc "bin/solr-exporter -p 9983 -b http://solr-slave1:8983/solr -f /opt/solr/contrib/prometheus-exporter/conf/solr-exporter-config.xml"
-    depends_on:
-      - solr-slave1
-    networks:
-      - solr
-      - monitoring
-
-  solr-slave2-exporter:
-    image: solr:9.9.0
-    container_name: solr-slave2-exporter
-    restart: unless-stopped
-    command: >
-      bash -lc "bin/solr-exporter -p 9983 -b http://solr-slave2:8983/solr -f /opt/solr/contrib/prometheus-exporter/conf/solr-exporter-config.xml"
-    depends_on:
-      - solr-slave2
-    networks:
-      - solr
-      - monitoring
 
   solr-config-uploader:
     build: ./solr
@@ -158,12 +122,12 @@ services:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=200h'
-      - '--web.enable-lifecycle'
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+      - "--storage.tsdb.retention.time=200h"
+      - "--web.enable-lifecycle"
     networks:
       - monitoring
 
@@ -179,7 +143,7 @@ services:
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
+      - GF_SERVER_ROOT_URL=http://localhost/grafana/
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
     networks:
       - monitoring

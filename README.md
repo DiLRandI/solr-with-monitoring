@@ -1,18 +1,26 @@
+
 # SolrCloud + ZooKeeper + Prometheus + Grafana (Learning Stack)
 
-Purpose of this repository
-- The goal is to help you learn the essentials of four components and how they work together:
-  - Apache Solr (search engine) in SolrCloud mode
-  - Apache ZooKeeper (cluster coordination for SolrCloud)
-  - Prometheus (metrics collection)
-  - Grafana (metrics visualization)
-- This is a hands-on, reproducible Docker Compose stack you can run locally to explore:
-  - How SolrCloud manages collections, shards, and replicas
-  - How ZooKeeper coordinates Solr nodes and stores cluster state/configsets
-  - How to expose Solr metrics via the official Solr Prometheus Exporter
-  - How to view and explore metrics in Grafana
+**This repository is for learning and experimentation only. It is not intended for production use.**
 
-Components and what they do
+## Purpose of this repository
+
+This project is a hands-on, reproducible Docker Compose stack designed **purely for learning**. It helps you understand the essentials of four core components and how they work together:
+
+- **Apache Solr** (search engine) in SolrCloud mode
+- **Apache ZooKeeper** (cluster coordination for SolrCloud)
+- **Prometheus** (metrics collection)
+- **Grafana** (metrics visualization)
+
+You can use this stack to:
+
+- Learn how SolrCloud manages collections, shards, and replicas
+- See how ZooKeeper coordinates Solr nodes and stores cluster state/configsets
+- Expose and collect Solr metrics using the official Solr Prometheus Exporter
+- Visualize and explore metrics in Grafana
+
+## Components and what they do
+
 - Solr (solr-master, solr-slave1, solr-slave2)
   - Open-source search platform built on Apache Lucene
   - SolrCloud mode provides distributed indexing and search via:
@@ -37,12 +45,13 @@ Components and what they do
 - Nginx (nginx)
   - Reverse proxy to provide clean URLs for this learning stack
   - Routes:
-    - http://localhost/grafana/ → Grafana UI
-    - http://localhost/solr-master/ → Solr master UI
-    - http://localhost/solr-slave1/ → Solr slave1 UI
-    - http://localhost/solr-slave2/ → Solr slave2 UI
+    - <http://localhost/grafana/> → Grafana UI
+    - <http://localhost/solr-master/> → Solr master UI
+    - <http://localhost/solr-slave1/> → Solr slave1 UI
+    - <http://localhost/solr-slave2/> → Solr slave2 UI
 
 What’s inside and key configuration choices
+
 - SolrCloud mode:
   - All Solr containers start with -cloud and connect to ZooKeeper
   - Persistent volumes for Solr data and ZooKeeper data
@@ -59,6 +68,7 @@ What’s inside and key configuration choices
   - Prometheus scrapes these exporters; Grafana can visualize
 
 Architecture diagram (high-level)
+
 ```
         ┌──────────────┐       ┌─────────────┐
         │   Nginx      │──────▶│   Grafana   │
@@ -79,13 +89,16 @@ Architecture diagram (high-level)
         └───────────┘
 ```
 
-Quick start
+## Quick start
+
 Prerequisites
+
 - Docker
 - Docker Compose
 - Make (optional)
 
 Start the stack
+
 - Using Docker Compose:
   - docker-compose build
   - docker-compose up -d
@@ -93,25 +106,29 @@ Start the stack
   - make up
 
 Access URLs (via Nginx)
-- Grafana: http://localhost/grafana/ (login admin/admin on first use, then change password)
-- Solr master: http://localhost/solr-master/
-- Solr slave1: http://localhost/solr-slave1/
-- Solr slave2: http://localhost/solr-slave2/
-- Prometheus (direct, not proxied): http://localhost:9090
+
+- Grafana: <http://localhost/grafana/> (login admin/admin on first use, then change password)
+- Solr master: <http://localhost/solr-master/>
+- Solr slave1: <http://localhost/solr-slave1/>
+- Solr slave2: <http://localhost/solr-slave2/>
+- Prometheus (direct, not proxied): <http://localhost:9090>
 
 Check cluster health and collections
+
 - List collections:
-  - curl "http://localhost/solr-master/admin/collections?action=LIST&wt=json"
+  - curl "<http://localhost/solr-master/admin/collections?action=LIST&wt=json>"
 - Cluster status:
-  - curl "http://localhost/solr-master/admin/collections?action=CLUSTERSTATUS&wt=json"
+  - curl "<http://localhost/solr-master/admin/collections?action=CLUSTERSTATUS&wt=json>"
 
 Index a sample document (movies)
+
 - Add a document:
-  - curl -sS -X POST "http://localhost/solr-master/movies/update?commit=true" -H "Content-Type: application/json" -d '[{"id":"tt0111161","title_s":"The Shawshank Redemption"}]'
+  - curl -sS -X POST "<http://localhost/solr-master/movies/update?commit=true>" -H "Content-Type: application/json" -d '[{"id":"tt0111161","title_s":"The Shawshank Redemption"}]'
 - Query:
-  - curl -sS "http://localhost/solr-master/movies/select?q=title_s:Shawshank&wt=json"
+  - curl -sS "<http://localhost/solr-master/movies/select?q=title_s:Shawshank&wt=json>"
 
 Learning focus: how each component fits
+
 - Solr and SolrCloud concepts
   - Collection: logical index; movies and users are examples
   - Shards: split collections for scalability (here numShards=2)
@@ -129,7 +146,8 @@ Learning focus: how each component fits
   - Subpath /grafana/ is configured; Prometheus datasource is provisioned in grafana/provisioning
   - Create or import dashboards (for Solr, JVM, containers, etc.)
 
-Project layout
+## Project layout
+
 ```
 .
 ├── docker-compose.yml               # Services and wiring
@@ -150,7 +168,8 @@ Project layout
            └── solrconfig.xml        # Solr runtime configuration
 ```
 
-Common operations
+## Common operations
+
 - View status
   - docker-compose ps
 - View logs
@@ -160,7 +179,8 @@ Common operations
 - Restart a service
   - docker-compose restart [service]
 
-Working with configsets and collections
+## Working with configsets and collections
+
 - Update the configset (e.g., change schema or solrconfig):
   1) Edit files under solr/_template/conf
   2) Rebuild the Solr image used by the uploader:
@@ -170,10 +190,10 @@ Working with configsets and collections
   4) For existing collections:
      - Some changes require collection reloads or reindexing
      - Reload a collection:
-       - curl "http://localhost/solr-master/admin/collections?action=RELOAD&name=movies&wt=json"
+       - curl "<http://localhost/solr-master/admin/collections?action=RELOAD&name=movies&wt=json>"
      - If luceneMatchVersion or schema fundamentals changed, reindex documents
 - Create a new collection from an uploaded configset:
-  - curl -G "http://localhost/solr-master/admin/collections" \
+  - curl -G "<http://localhost/solr-master/admin/collections>" \
     --data-urlencode action=CREATE \
     --data-urlencode name=books \
     --data-urlencode collection.configName=movies \
@@ -182,13 +202,15 @@ Working with configsets and collections
     --data-urlencode maxShardsPerNode=2 \
     --data-urlencode wt=json
 
-Monitoring notes
+## Monitoring notes
+
 - Prometheus is scraping exporters under the “solr-exporters” job defined in prometheus.yml
 - If exporters are restarting:
   - docker-compose logs -f solr-master-exporter solr-slave1-exporter solr-slave2-exporter
   - Adjust exporter flags or ensure base Solr endpoints are reachable
 
-Security and production hardening (deliberately disabled here)
+## Security and production hardening (deliberately disabled here)
+
 - This repo runs without Solr authentication/TLS to simplify learning
 - For production:
   - Add security.json for BasicAuth/RuleBasedAuthorization
@@ -197,6 +219,18 @@ Security and production hardening (deliberately disabled here)
   - Set resource limits and capacity plan SOLR_HEAP per workload
   - Consider cache tuning (queryResultCache/filterCache/documentCache) and request limits
 
-Troubleshooting tips
+## Troubleshooting tips
+
 - Ports in use
-  - sudo lsof -i :80; sudo lsof -i
+
+---
+
+**Learning summary:**
+
+This repository is intentionally insecure and simplified for educational purposes. It is ideal for:
+
+- Experimenting with SolrCloud, ZooKeeper, Prometheus, and Grafana
+- Understanding distributed search and monitoring basics
+- Practicing Docker Compose orchestration
+
+**Not for production!**
