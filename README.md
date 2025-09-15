@@ -1,191 +1,202 @@
-# SolrCloud Cluster with Monitoring (Production-Oriented)
+# SolrCloud + ZooKeeper + Prometheus + Grafana (Learning Stack)
 
-This stack deploys Apache Solr 9.9 in SolrCloud mode with ZooKeeper, Prometheus metrics via the official Solr Prometheus Exporter, Grafana dashboards, and Nginx as a reverse proxy for Grafana. It follows Solr 9.9 Reference Guide recommendations where applicable, with security explicitly disabled per request.
+Purpose of this repository
+- The goal is to help you learn the essentials of four components and how they work together:
+  - Apache Solr (search engine) in SolrCloud mode
+  - Apache ZooKeeper (cluster coordination for SolrCloud)
+  - Prometheus (metrics collection)
+  - Grafana (metrics visualization)
+- This is a hands-on, reproducible Docker Compose stack you can run locally to explore:
+  - How SolrCloud manages collections, shards, and replicas
+  - How ZooKeeper coordinates Solr nodes and stores cluster state/configsets
+  - How to expose Solr metrics via the official Solr Prometheus Exporter
+  - How to view and explore metrics in Grafana
 
-Key changes vs legacy setup:
-- SolrCloud (not standalone cores). ZooKeeper-backed and persistent volumes.
-- Collections bootstrap for movies and users.
-- Prometheus exporters per Solr node (official exporter).
-- Safer solrconfig defaults (luceneMatchVersion=9.9.0, hardened request parsing, durable updates with tlog + soft/hard commits).
-- No authentication/TLS as requested; add later for production hardening.
+Components and what they do
+- Solr (solr-master, solr-slave1, solr-slave2)
+  - Open-source search platform built on Apache Lucene
+  - SolrCloud mode provides distributed indexing and search via:
+    - Collections: logical indexes
+    - Shards: partitions of a collection
+    - Replicas: copies of shards for high availability
+  - This stack bootstraps two collections: movies and users (2 shards, RF=2)
 
-## Architecture
+- ZooKeeper (zookeeper)
+  - Central coordination service used by SolrCloud
+  - Holds cluster state, live_nodes info, and stores configsets pushed by Solr
+  - In production you should use a 3-node ensemble for HA; here we run a single node for learning
 
+- Prometheus (prometheus)
+  - Time-series database and scraping engine for metrics
+  - Scrapes the official Solr Prometheus Exporters (one per Solr node) to collect metrics
+
+- Grafana (grafana)
+  - Visualization tool for dashboards based on Prometheus metrics
+  - Access through Nginx under /grafana/ (subpath-aware)
+
+- Nginx (nginx)
+  - Reverse proxy to provide clean URLs for this learning stack
+  - Routes:
+    - http://localhost/grafana/ → Grafana UI
+    - http://localhost/solr-master/ → Solr master UI
+    - http://localhost/solr-slave1/ → Solr slave1 UI
+    - http://localhost/solr-slave2/ → Solr slave2 UI
+
+What’s inside and key configuration choices
+- SolrCloud mode:
+  - All Solr containers start with -cloud and connect to ZooKeeper
+  - Persistent volumes for Solr data and ZooKeeper data
+- Configsets and collections:
+  - A shared configset template lives in solr/_template/conf
+  - A one-off job uploads configsets “movies” and “users” to ZooKeeper
+  - A one-off init job creates the two collections if they don’t exist
+- Solr configuration:
+  - luceneMatchVersion set to 9.9.0 (reindex recommended after changing this)
+  - Request parsing hardened: remote streaming disabled; upload limits set
+  - Durable updates: transaction log enabled, soft commit every 15s, hard commit every 10m with openSearcher=false
+- Monitoring:
+  - Official Solr Prometheus Exporter containers per Solr node
+  - Prometheus scrapes these exporters; Grafana can visualize
+
+Architecture diagram (high-level)
 ```
-SolrCloud (3 Solr nodes)  <-- ZooKeeper (single node)
-             |
-             +-- Collections: movies, users (2 shards, RF=2 by default)
-
-Prometheus <- Solr Exporters (1 per Solr node)
-Grafana <- (provisioning included in repo)  <-- Nginx reverse proxy
+        ┌──────────────┐       ┌─────────────┐
+        │   Nginx      │──────▶│   Grafana   │
+        │  (reverse    │       └─────────────┘
+        │   proxy)     │
+        │              │──────▶ Prometheus UI
+        │              │
+        │              │──────▶ Solr UIs (master/slave1/slave2)
+        └──────┬───────┘
+               │
+    ┌──────────▼──────────┐
+    │      SolrCloud      │  3 Solr nodes (master, slave1, slave2)
+    │  (movies, users)    │  connect to ZooKeeper
+    └─────────┬───────────┘
+              │
+        ┌─────▼─────┐
+        │ ZooKeeper │ (single-node for learning)
+        └───────────┘
 ```
 
-Network and ports:
-- Solr Admin UIs: http://localhost:8986/solr, http://localhost:8987/solr, http://localhost:8988/solr
-- Prometheus: http://localhost:9090
-- Grafana (direct): http://localhost:3000
-- Grafana (via Nginx): http://localhost
-- ZooKeeper: 2181 (exposed for convenience)
+Quick start
+Prerequisites
+- Docker
+- Docker Compose
+- Make (optional)
 
-## Services
+Start the stack
+- Using Docker Compose:
+  - docker-compose build
+  - docker-compose up -d
+- Or with Make:
+  - make up
 
-- ZooKeeper (single node for now; use 3-node ensemble in production)
-  - Image: zookeeper:3.8
-  - Volumes: zk_data, zk_datalog
-- Solr nodes (3) in SolrCloud mode
-  - Build: ./solr (FROM solr:9.9.0)
-  - Heap: SOLR_HEAP=1g
-  - GC logs enabled (G1 by default on Java 17+)
-  - Persistent data volumes per node
-  - Command: solr -f -cloud -z zookeeper:2181 -s /var/solr
-- Solr Prometheus Exporters (3)
-  - Image: solr:9.9.0
-  - Command: bin/solr-exporter -p 9983 -b http://<solr-node>:8983/solr -f /opt/solr/contrib/prometheus-exporter/conf/solr-exporter-config.xml
-- Configset Uploader (one-off)
-  - Uploads configsets “movies” and “users” from Docker image to ZooKeeper prior to collection creation
-- Collections Init (one-off)
-  - Waits for Solr cluster and creates collections if missing
+Access URLs (via Nginx)
+- Grafana: http://localhost/grafana/ (login admin/admin on first use, then change password)
+- Solr master: http://localhost/solr-master/
+- Solr slave1: http://localhost/solr-slave1/
+- Solr slave2: http://localhost/solr-slave2/
+- Prometheus (direct, not proxied): http://localhost:9090
 
-## Production-Ready Configuration Highlights (per Solr 9.9 docs)
+Check cluster health and collections
+- List collections:
+  - curl "http://localhost/solr-master/admin/collections?action=LIST&wt=json"
+- Cluster status:
+  - curl "http://localhost/solr-master/admin/collections?action=CLUSTERSTATUS&wt=json"
 
-- SolrCloud enabled with ZooKeeper for state management.
-- luceneMatchVersion set to 9.9.0.
-- Request hardening: disable remote stream, limit upload sizes, avoid 304 edge cases.
-- Durable updates: tlog enabled; soft commit for NRT; periodic hard commit with closed searcher to cap tlog growth.
-- Prometheus metrics via official exporter.
-- Persistent volumes for Solr data and ZooKeeper.
+Index a sample document (movies)
+- Add a document:
+  - curl -sS -X POST "http://localhost/solr-master/movies/update?commit=true" -H "Content-Type: application/json" -d '[{"id":"tt0111161","title_s":"The Shawshank Redemption"}]'
+- Query:
+  - curl -sS "http://localhost/solr-master/movies/select?q=title_s:Shawshank&wt=json"
 
-Note: Authentication and TLS are disabled per your requirement. For production hardening, later add:
-- security.json for BasicAuth/PKI and RBAC.
-- TLS for Solr (Jetty) or termination at a reverse proxy.
-- 3-node ZooKeeper ensemble for HA.
+Learning focus: how each component fits
+- Solr and SolrCloud concepts
+  - Collection: logical index; movies and users are examples
+  - Shards: split collections for scalability (here numShards=2)
+  - Replicas: fault-tolerance (here replicationFactor=2)
+  - ZooKeeper: cluster state, leadership election, and configset storage
+- ZooKeeper
+  - Solr uploads configsets to ZK: /configs/movies, /configs/users
+  - Cluster metadata under /collections, /live_nodes, /clusterstate.json or collection-specific state
+  - You can inspect via Solr’s ZK APIs or `bin/solr zk` commands inside a Solr container
+- Prometheus and Exporters
+  - Exporters scrape metrics from Solr endpoints and expose them for Prometheus
+  - Prometheus scrapes exporters and stores time-series data
+  - You can query metrics in Prometheus or build dashboards in Grafana
+- Grafana
+  - Subpath /grafana/ is configured; Prometheus datasource is provisioned in grafana/provisioning
+  - Create or import dashboards (for Solr, JVM, containers, etc.)
 
-## File Structure
-
+Project layout
 ```
 .
-├── docker-compose.yml
-├── prometheus.yml
+├── docker-compose.yml               # Services and wiring
+├── prometheus.yml                   # Prometheus scrape config (solr-exporters job)
 ├── grafana/
 │   └── provisioning/
 │       ├── datasources/prometheus.yml
 │       └── dashboards/{dashboard.yml,prometheus-overview.json}
 ├── nginx/
-│   ├── nginx.conf
-│   └── default.conf
+│   ├── nginx.conf                   # Main Nginx config
+│   └── default.conf                 # Routes /grafana, /solr-master, /solr-slave1, /solr-slave2
 └── solr/
-    ├── Dockerfile          # Copies _template configset into configsets "movies" and "users"
+    ├── Dockerfile                   # Copies _template into configsets "movies" and "users"
     └── _template/
         ├── log4j2.xml
         └── conf/
-           ├── schema.xml
-           └── solrconfig.xml
+           ├── schema.xml            # Simple dynamic field-based schema
+           └── solrconfig.xml        # Solr runtime configuration
 ```
 
-## Quick Start
+Common operations
+- View status
+  - docker-compose ps
+- View logs
+  - docker-compose logs -f [service]
+- Shell into a container
+  - docker-compose exec [service] sh
+- Restart a service
+  - docker-compose restart [service]
 
-Prereqs: Docker, Docker Compose, Make (optional)
+Working with configsets and collections
+- Update the configset (e.g., change schema or solrconfig):
+  1) Edit files under solr/_template/conf
+  2) Rebuild the Solr image used by the uploader:
+     - docker-compose build solr-config-uploader
+  3) Re-upload configsets to ZK:
+     - docker-compose run --rm solr-config-uploader
+  4) For existing collections:
+     - Some changes require collection reloads or reindexing
+     - Reload a collection:
+       - curl "http://localhost/solr-master/admin/collections?action=RELOAD&name=movies&wt=json"
+     - If luceneMatchVersion or schema fundamentals changed, reindex documents
+- Create a new collection from an uploaded configset:
+  - curl -G "http://localhost/solr-master/admin/collections" \
+    --data-urlencode action=CREATE \
+    --data-urlencode name=books \
+    --data-urlencode collection.configName=movies \
+    --data-urlencode numShards=2 \
+    --data-urlencode replicationFactor=2 \
+    --data-urlencode maxShardsPerNode=2 \
+    --data-urlencode wt=json
 
-1) Build and start
-```bash
-docker-compose build
-docker-compose up -d
-# or: make up
-```
+Monitoring notes
+- Prometheus is scraping exporters under the “solr-exporters” job defined in prometheus.yml
+- If exporters are restarting:
+  - docker-compose logs -f solr-master-exporter solr-slave1-exporter solr-slave2-exporter
+  - Adjust exporter flags or ensure base Solr endpoints are reachable
 
-2) Verify cluster
-```bash
-docker-compose ps
-# Configsets upload (runs automatically then exits)
-docker-compose logs -f solr-config-uploader
-# Collections init (runs automatically then exits)
-docker-compose logs -f solr-init
-```
+Security and production hardening (deliberately disabled here)
+- This repo runs without Solr authentication/TLS to simplify learning
+- For production:
+  - Add security.json for BasicAuth/RuleBasedAuthorization
+  - Enable TLS (Jetty in Solr) or terminate TLS at a reverse proxy
+  - Use a 3-node ZooKeeper ensemble for HA
+  - Set resource limits and capacity plan SOLR_HEAP per workload
+  - Consider cache tuning (queryResultCache/filterCache/documentCache) and request limits
 
-3) Access UIs
-- Solr UIs:
-  - http://localhost:8986/solr
-  - http://localhost:8987/solr
-  - http://localhost:8988/solr
-- Prometheus: http://localhost:9090
-- Grafana: http://localhost (via nginx) or http://localhost:3000
-
-4) Validate collections and cluster
-```bash
-curl "http://localhost:8986/solr/admin/collections?action=LIST&wt=json"
-curl "http://localhost:8986/solr/admin/collections?action=CLUSTERSTATUS&wt=json"
-```
-
-## Collections
-
-The init job creates:
-- movies: numShards=2, replicationFactor=2
-- users: numShards=2, replicationFactor=2
-
-To change shard/RF:
-- Edit docker-compose.yml in solr-init command section.
-
-## Monitoring
-
-- Solr Exporters expose Prometheus metrics on port 9983 within the Docker network.
-- prometheus.yml scrapes the three exporter containers under job “solr-exporters”.
-- Grafana is pre-provisioned. Add custom Solr dashboards as needed.
-
-Prometheus target list:
-- Prometheus
-- Grafana
-- solr-master-exporter, solr-slave1-exporter, solr-slave2-exporter
-
-## Makefile Shortcuts
-
-Common commands:
-```bash
-make up           # start everything
-make down         # stop everything
-make build        # build images
-make logs         # all logs
-make status       # docker-compose ps
-make urls         # print URLs
-```
-
-## Solr Config Notes
-
-solr/_template/conf/solrconfig.xml includes:
-- <luceneMatchVersion>9.9.0</luceneMatchVersion>
-- <requestDispatcher> with:
-  - enableRemoteStreaming=false
-  - multipartUploadLimitInKB=204800
-  - formdataUploadLimitInKB=2048
-  - httpCaching never304=true
-- Durable update handler:
-  - tlog enabled
-  - autoSoftCommit maxTime=15000 (15s)
-  - autoCommit maxTime=600000 (10m), openSearcher=false
-
-Adjust commit policies per indexing/search latency and durability needs.
-
-## Security
-
-Per request, no Solr auth or TLS is enabled. For production:
-- Add security.json (BasicAuth + RuleBasedAuthorization).
-- Enable TLS in Solr (Jetty) or terminate TLS at an ingress/proxy.
-- Restrict admin/API access via network policy/firewall.
-- Rotate credentials using Docker secrets or env files.
-
-## HA Recommendations
-
-- Move to a 3-node ZooKeeper ensemble.
-- Use at least 3 Solr nodes (already done here).
-- Pin CPU/memory limits per node.
-- Use dedicated storage classes with fast disks.
-
-## Troubleshooting
-
-- Exporter down: check logs for each exporter container; validate base URL and config path.
-- Collections missing: check solr-config-uploader then solr-init logs; ensure Solr UIs are reachable.
-- Cluster state: use CLUSTERSTATUS API above.
-- Performance tuning: evaluate queryResultCache/filterCache, autoscaling, and JVM heap size based on real workloads.
-
-## License
-
-This project is part of the solr-with-monitoring setup. Apache Solr is under the Apache License 2.0.
+Troubleshooting tips
+- Ports in use
+  - sudo lsof -i :80; sudo lsof -i
