@@ -33,10 +33,12 @@ You can use this stack to:
   - Central coordination service used by SolrCloud
   - Holds cluster state, live_nodes info, and stores configsets pushed by Solr
   - In production you should use a 3-node ensemble for HA; here we run a single node for learning
+  - **Built-in Prometheus metrics** exposed on port 7000 (/metrics endpoint)
 
 - Prometheus (prometheus)
   - Time-series database and scraping engine for metrics
-  - Scrapes the official Solr Prometheus Exporters (one per Solr node) to collect metrics
+  - Scrapes the official Solr Prometheus Exporters (one per Solr node) to collect Solr metrics
+  - Scrapes ZooKeeper metrics directly from its built-in Prometheus endpoint (port 7000)
 
 - Grafana (grafana)
   - Visualization tool for dashboards based on Prometheus metrics
@@ -166,6 +168,9 @@ Learning focus: how each component fits
         └── conf/
            ├── schema.xml            # Simple dynamic field-based schema
            └── solrconfig.xml        # Solr runtime configuration
+└── zookeeper/
+    └── conf/
+        └── zoo.cfg                  # ZooKeeper configuration with Prometheus metrics enabled
 ```
 
 ## Common operations
@@ -204,10 +209,13 @@ Learning focus: how each component fits
 
 ## Monitoring notes
 
-- Prometheus is scraping exporters under the “solr-exporters” job defined in prometheus.yml
+- Prometheus is scraping metrics from multiple sources:
+  - **Solr metrics**: Scraped from the official Solr Prometheus Exporters (one per Solr node) under the "solr-exporters" job
+  - **ZooKeeper metrics**: Scraped directly from ZooKeeper's built-in Prometheus endpoint (port 7000) under the "zookeeper" job
 - If exporters are restarting:
-  - docker-compose logs -f solr-master-exporter solr-slave1-exporter solr-slave2-exporter
-  - Adjust exporter flags or ensure base Solr endpoints are reachable
+  - docker-compose logs -f solr-master solr-slave1 solr-slave2
+  - Check Solr logs for issues with the built-in exporters
+- ZooKeeper metrics are now provided natively without an external exporter, simplifying the setup
 
 ## Security and production hardening (deliberately disabled here)
 

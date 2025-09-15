@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
-# Start Solr in the background
-solr-foreground &
+# Start Solr in SolrCloud mode with ZooKeeper connection
+solr-foreground -cloud -z zookeeper:2181 &
 # Wait for Solr to be up
 until curl -sSf "http://localhost:8983/solr/admin/info/system" >/dev/null; do
   echo "Waiting for Solr to start...";

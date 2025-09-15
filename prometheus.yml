@@ -9,11 +9,21 @@ scrape_configs:
 
   - job_name: "solr-exporters"
     static_configs:
-      - targets:
-          - "solr-master:9983"
-          - "solr-slave1:9983"
-          - "solr-slave2:9983"
+      - targets: ["solr-master:9983"]
+        labels:
+          alias: "Solr Master"
+          solr_role: "master"
+      - targets: ["solr-slave1:9983"]
+        labels:
+          alias: "Solr Slave 1"
+          solr_role: "slave"
+      - targets: ["solr-slave2:9983"]
+        labels:
+          alias: "Solr Slave 2"
+          solr_role: "slave"
 
   - job_name: "zookeeper"
     static_configs:
       - targets: ["zookeeper:7000"]
+        labels:
+          alias: "ZooKeeper"
