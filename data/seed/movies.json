@@ -1,0 +1,63 @@
+[
+  {
+    "id": "movie-001",
+    "title": "Arrival",
+    "synopsis": "A linguist works with the military after alien ships appear around the world.",
+    "genre": "Science Fiction",
+    "release_year": 2016,
+    "director": "Denis Villeneuve",
+    "cast": ["Amy Adams", "Jeremy Renner", "Forest Whitaker"],
+    "language": "English",
+    "runtime_minutes": 116,
+    "rating": 7.9
+  },
+  {
+    "id": "movie-002",
+    "title": "Spirited Away",
+    "synopsis": "A young girl enters a magical bathhouse world and must rescue her parents.",
+    "genre": "Fantasy",
+    "release_year": 2001,
+    "director": "Hayao Miyazaki",
+    "cast": ["Rumi Hiiragi", "Miyu Irino", "Mari Natsuki"],
+    "language": "Japanese",
+    "runtime_minutes": 125,
+    "rating": 8.6
+  },
+  {
+    "id": "movie-003",
+    "title": "The Dark Knight",
+    "synopsis": "Batman faces the Joker as Gotham descends into chaos.",
+    "genre": "Action",
+    "release_year": 2008,
+    "director": "Christopher Nolan",
+    "cast": ["Christian Bale", "Heath Ledger", "Aaron Eckhart"],
+    "language": "English",
+    "runtime_minutes": 152,
+    "rating": 9.0
+  },
+  {
+    "id": "movie-004",
+    "title": "Parasite",
+    "synopsis": "A poor family slowly infiltrates the life of a wealthy household.",
+    "genre": "Thriller",
+    "release_year": 2019,
+    "director": "Bong Joon-ho",
+    "cast": ["Song Kang-ho", "Lee Sun-kyun", "Cho Yeo-jeong"],
+    "language": "Korean",
+    "runtime_minutes": 132,
+    "rating": 8.5
+  },
+  {
+    "id": "movie-005",
+    "title": "The Lord of the Rings: The Fellowship of the Ring",
+    "synopsis": "A hobbit begins a quest to destroy a powerful ring before evil consumes Middle-earth.",
+    "genre": "Adventure",
+    "release_year": 2001,
+    "director": "Peter Jackson",
+    "cast": ["Elijah Wood", "Ian McKellen", "Viggo Mortensen"],
+    "language": "English",
+    "runtime_minutes": 178,
+    "rating": 8.8
+  }
+]
+

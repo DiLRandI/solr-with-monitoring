@@ -1,0 +1,31 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+scrape_configs:
+  - job_name: solr
+    metrics_path: /solr/admin/metrics
+    scrape_protocols:
+      - OpenMetricsText1.0.0
+    params:
+      wt:
+        - openmetrics
+    static_configs:
+      - targets:
+          - solr-master:8983
+        labels:
+          solr_node: master
+      - targets:
+          - solr-slave1:8983
+        labels:
+          solr_node: follower-1
+      - targets:
+          - solr-slave2:8983
+        labels:
+          solr_node: follower-2
+
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - prometheus:9090
+

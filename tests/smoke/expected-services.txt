@@ -1,0 +1,3 @@
+solr-master
+solr-slave1
+solr-slave2

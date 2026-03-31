@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<schema name="books" version="1.7">
+  <field name="id" type="string" indexed="true" stored="true" required="true" multiValued="false"/>
+  <field name="title" type="text_general" indexed="true" stored="true"/>
+  <field name="summary" type="text_general" indexed="true" stored="true"/>
+  <field name="author" type="text_general" indexed="true" stored="true"/>
+  <field name="genre" type="text_general" indexed="true" stored="true"/>
+  <field name="isbn" type="string" indexed="true" stored="true"/>
+  <field name="publication_year" type="pint" indexed="true" stored="true"/>
+  <field name="language" type="text_general" indexed="true" stored="true"/>
+  <field name="page_count" type="pint" indexed="true" stored="true"/>
+  <field name="rating" type="pfloat" indexed="true" stored="true"/>
+  <field name="_version_" type="plong" indexed="false" stored="false"/>
+
+  <uniqueKey>id</uniqueKey>
+
+  <fieldType name="string" class="solr.StrField" sortMissingLast="true"/>
+  <fieldType name="pint" class="solr.IntPointField"/>
+  <fieldType name="pfloat" class="solr.FloatPointField"/>
+  <fieldType name="plong" class="solr.LongPointField"/>
+  <fieldType name="text_general" class="solr.TextField" positionIncrementGap="100">
+    <analyzer type="index">
+      <tokenizer class="solr.StandardTokenizerFactory"/>
+      <filter class="solr.LowerCaseFilterFactory"/>
+    </analyzer>
+    <analyzer type="query">
+      <tokenizer class="solr.StandardTokenizerFactory"/>
+      <filter class="solr.LowerCaseFilterFactory"/>
+    </analyzer>
+  </fieldType>
+</schema>
+
