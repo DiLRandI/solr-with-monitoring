@@ -1,233 +1,314 @@
-# SolrCloud + ZooKeeper + Prometheus + Grafana (Learning Stack)
+# Solr 10 User-Managed Reference Lab
 
-**This repository is for learning and experimentation only. It is not intended for production use.**
+This repository is a local learning environment for Apache Solr 10 in user-managed mode.
 
-## Purpose of this repository
+It runs:
 
-This project is a hands-on, reproducible Docker Compose stack designed **purely for learning**. It helps you understand the essentials of four core components and how they work together:
+- 1 Solr master write node
+- 2 Solr follower read nodes
+- 2 user-managed cores: `movies` and `books`
+- classic `ReplicationHandler` replication from the master to both followers
+- OpenTelemetry tracing
+- Jaeger for trace search and visualization
+- Prometheus for metrics scraping
+- Grafana for dashboards
+- a standalone Go seeder under `app/` that runs on the host machine
 
-- **Apache Solr** (search engine) in SolrCloud mode
-- **Apache ZooKeeper** (cluster coordination for SolrCloud)
-- **Prometheus** (metrics collection)
-- **Grafana** (metrics visualization)
+There is no SolrCloud, no ZooKeeper, and no collections.
 
-You can use this stack to:
+## Architecture diagram
 
-- Learn how SolrCloud manages collections, shards, and replicas
-- See how ZooKeeper coordinates Solr nodes and stores cluster state/configsets
-- Expose and collect Solr metrics using the official Solr Prometheus Exporter
-- Visualize and explore metrics in Grafana
+```mermaid
+flowchart LR
+  subgraph Solr
+    M[solr-master<br/>movies + books]
+    S1[solr-slave1<br/>movies + books]
+    S2[solr-slave2<br/>movies + books]
+  end
 
-## Components and what they do
+  A[Go Seeder<br/>host process]
 
-- **Solr (solr-master, solr-slave1, solr-slave2)**
-  - Open-source search platform built on Apache Lucene
-  - SolrCloud mode provides distributed indexing and search via:
-    - Collections: logical indexes
-    - Shards: partitions of a collection
-    - Replicas: copies of shards for high availability
-  - This stack bootstraps two collections: `movies` and `users` (2 shards, RF=2)
+  M -- "/replication per core" --> S1
+  M -- "/replication per core" --> S2
 
-- **ZooKeeper (zookeeper)**
-  - Central coordination service used by SolrCloud
-  - Holds cluster state, `live_nodes` info, and stores configsets pushed by Solr
-  - In production you should use a 3-node ensemble for HA; here we run a single node for learning
-  - **Built-in Prometheus metrics** exposed on port `7000` (`/metrics` endpoint)
+  P[Prometheus] --> G[Grafana]
+  A --> P
+  M --> P
+  S1 --> P
+  S2 --> P
 
-- **Prometheus (prometheus)**
-  - Time-series database and scraping engine for metrics
-  - Scrapes the official Solr Prometheus Exporters (one per Solr node) to collect Solr metrics
-  - Scrapes ZooKeeper metrics directly from its built-in Prometheus endpoint (port 7000)
-
-- **Grafana (grafana)**
-  - Visualization tool for dashboards based on Prometheus metrics
-  - Access through Nginx under `/grafana/` (subpath-aware)
-  - Comes with a pre-configured Prometheus datasource and two dashboards: `Prometheus Overview` and `Solr`.
-
-- **Nginx (nginx)**
-  - Reverse proxy to provide clean URLs for this learning stack
-  - Routes:
-    - `http://localhost/grafana/` → Grafana UI
-    - `http://localhost/solr-master/` → Solr master UI
-    - `http://localhost/solr-slave1/` → Solr slave1 UI
-    - `http://localhost/solr-slave2/` → Solr slave2 UI
-
-- **Go Seeder (app)**
-  - A simple Go application that seeds the `movies` and `users` collections with random data.
-  - It runs as a one-off container and posts data to Solr in batches.
-
-## Architecture diagram (high-level)
-
-```
-        ┌──────────────┐       ┌─────────────┐
-        │   Nginx      │──────▶│   Grafana   │
-        │  (reverse    │       └─────────────┘
-        │   proxy)     │
-        │              │──────▶ Prometheus UI
-        │              │
-        │              │──────▶ Solr UIs (master/slave1/slave2)
-        └──────┬───────┘
-               │
-    ┌──────────▼──────────┐
-    │      SolrCloud      │  3 Solr nodes (master, slave1, slave2)
-    │  (movies, users)    │  connect to ZooKeeper
-    └─────────┬───────────┘
-              │
-        ┌─────▼─────┐
-        │ ZooKeeper │ (single-node for learning)
-        └───────────┘
+  A -- OTLP traces --> O[OTEL Collector]
+  M -- OTLP traces --> O[OTEL Collector]
+  S1 -- OTLP traces --> O
+  S2 -- OTLP traces --> O
+  O --> J[Jaeger]
+  J --> G
 ```
 
-## Quick start
-
-**Prerequisites**
+## Prerequisites
 
 - Docker
 - Docker Compose
-- Make (optional, but recommended)
+- Go 1.26.1 or newer
+- `curl`
 
-**Start the stack**
+## Quick start
 
-- Using Make (recommended):
-
-  ```bash
-  make up
-  ```
-
-- Or with Docker Compose:
-
-  ```bash
-  docker-compose build
-  docker-compose up -d
-  ```
-
-**Access URLs (via Nginx)**
-
-- Grafana: `http://localhost/grafana/` (login `admin/admin` on first use, then change password)
-- Solr master: `http://localhost/solr-master/`
-- Solr slave1: `http://localhost/solr-slave1/`
-- Solr slave2: `http://localhost/solr-slave2/`
-- Prometheus (direct, not proxied): `http://localhost:9090`
-
-**Check cluster health and collections**
-
-- List collections:
-
-  ```bash
-  curl "http://localhost/solr-master/admin/collections?action=LIST&wt=json"
-  ```
-
-- Cluster status:
-
-  ```bash
-  curl "http://localhost/solr-master/admin/collections?action=CLUSTERSTATUS&wt=json"
-  ```
-
-**Index a sample document (movies)**
-
-- Add a document:
-
-  ```bash
-  curl -sS -X POST "http://localhost/solr-master/movies/update?commit=true" -H "Content-Type: application/json" -d '[{"id":"tt0111161","title_s":"The Shawshank Redemption"}]'
-  ```
-
-- Query:
-
-  ```bash
-  curl -sS "http://localhost/solr-master/movies/select?q=title_s:Shawshank&wt=json"
-  ```
-
-## Makefile commands
-
-The `Makefile` provides several commands to simplify the management of the stack:
-
-- `make up`: Start all services
-- `make down`: Stop all services
-- `make build`: Build all services
-- `make rebuild`: Rebuild and start all services
-- `make logs`: Show logs from all services
-- `make restart`: Restart all services
-- `make clean`: Remove all containers and volumes
-- `make status`: Show status of all services
-- `make shell-prometheus`: Open shell in Prometheus container
-- `make shell-grafana`: Open shell in Grafana container
-- `make shell-nginx`: Open shell in Nginx container
-
-## Project layout
-
-```
-.
-├── docker-compose.yml               # Services and wiring
-├── Makefile                         # Makefile for easy stack management
-├── prometheus.yml                   # Prometheus scrape config (solr-exporters job)
-├── app/
-│   ├── go.mod
-│   └── cmd/
-│       └── main.go                  # Go application for seeding data
-├── grafana/
-│   └── provisioning/
-│       ├── dashboards/
-│       │   ├── dashboard.yml
-│       │   ├── prometheus-overview.json
-│       │   └── solr.json
-│       └── datasources/
-│           └── prometheus.yml
-├── nginx/
-│   ├── nginx.conf                   # Main Nginx config
-│   └── default.conf                 # Routes /grafana, /solr-master, /solr-slave1, /solr-slave2
-├── solr/
-│   ├── Dockerfile                   # Custom Solr Docker image
-│   ├── solr-exporter-config.xml     # Solr Prometheus exporter configuration
-│   ├── start-solr-and-exporter.sh   # Script to start Solr and the exporter
-│   └── _template/
-│       ├── log4j2.xml
-│       └── conf/
-│          ├── schema.xml            # Simple dynamic field-based schema
-│          └── solrconfig.xml        # Solr runtime configuration
-└── zookeeper/
-    └── conf/
-        └── zoo.cfg                  # ZooKeeper configuration with Prometheus metrics enabled
+```bash
+cp .env.example .env
+make up
 ```
 
-## Custom Solr Docker image
+In a second terminal, start the local seeder:
 
-The `solr/Dockerfile` creates a custom Solr image with the following modifications:
+```bash
+make run-seeder
+```
 
-- Installs `tini` for process management.
-- Copies the `_template` directory to create `movies` and `users` configsets.
-- Copies a custom `solr-exporter-config.xml` for Prometheus metrics.
-- Uses a custom `start-solr-and-exporter.sh` script to run both Solr and the Prometheus exporter in the same container.
+Optional deterministic validation:
 
-## Grafana Dashboards
+```bash
+make smoke-test
+```
 
-The Grafana instance is provisioned with two dashboards:
+Useful URLs:
 
-- **Prometheus Overview**: A general dashboard for monitoring Prometheus itself.
-- **Solr**: A dashboard for monitoring Solr metrics, such as query latency, cache hit ratio, and JVM metrics.
+- Solr master: `http://localhost:8983/solr`
+- Solr follower 1: `http://localhost:8984/solr`
+- Solr follower 2: `http://localhost:8985/solr`
+- Seeder metrics: `http://localhost:9464/metrics`
+- OTEL Collector health: `http://localhost:13133/`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000`
+- Jaeger: `http://localhost:16686`
 
-## Security and production hardening (deliberately disabled here)
+Grafana defaults to `admin / admin` unless you override `.env`.
 
-- This repo runs without Solr authentication/TLS to simplify learning
-- For production:
-  - Add `security.json` for BasicAuth/RuleBasedAuthorization
-  - Enable TLS (Jetty in Solr) or terminate TLS at a reverse proxy
-  - Use a 3-node ZooKeeper ensemble for HA
-  - Set resource limits and capacity plan `SOLR_HEAP` per workload
-  - Consider cache tuning (`queryResultCache`/`filterCache`/`documentCache`) and request limits
+## Repository structure
 
-## Troubleshooting tips
+- `app/` contains the standalone Go seeder module.
+- `docker/solr/` contains the custom Solr image build and the init script that precreates cores.
+- `solr/` contains the repo-owned Solr configs that get copied into the image at build time.
+- `observability/` contains OTEL Collector, Prometheus, and Grafana configuration.
+- `scripts/` contains the helper commands used by `make`.
 
-- **Ports in use**: If you get an error about a port being in use, check if you have any other services running on the same ports. You can change the ports in the `docker-compose.yml` file.
-- **Logs**: Use `make logs` or `docker-compose logs -f [service]` to view the logs of a specific service.
+## Continuous Go seeder
 
----
+- The seeder lives under `app/` and is not built into any Docker image.
+- It does not run in `docker-compose.yml` by default.
+- It writes only to the Solr master update endpoints for `movies` and `books`.
+- It never sends commit commands. The Solr master's existing auto-commit settings make new index versions available to followers.
+- It runs continuously until it receives `SIGINT` or `SIGTERM`.
+- By default it uses 10 workers for `movies` and 10 workers for `books`, generating realistic random documents for both cores.
+- It exports OTLP traces to the existing OTEL Collector and exposes Prometheus metrics on a local `/metrics` endpoint so the seeder appears in the same Grafana and Jaeger setup as Solr.
 
-**Learning summary:**
+Build the binary:
 
-This repository is intentionally insecure and simplified for educational purposes. It is ideal for:
+```bash
+make build-seeder
+```
 
-- Experimenting with SolrCloud, ZooKeeper, Prometheus, and Grafana
-- Understanding distributed search and monitoring basics
-- Practicing Docker Compose orchestration
+Run the default learning-oriented profile:
 
-**Not for production!**
+```bash
+make run-seeder
+```
+
+Run a faster profile with larger batches and no per-worker sleep:
+
+```bash
+make run-seeder-fast
+```
+
+Useful configuration flags and environment variables:
+
+- `--solr-base-url` / `SEEDER_SOLR_BASE_URL` default `http://localhost:8983/solr`
+- `--movies-core` / `SEEDER_MOVIES_CORE` default `movies`
+- `--books-core` / `SEEDER_BOOKS_CORE` default `books`
+- `--movie-workers` / `SEEDER_MOVIE_WORKERS` default `10`
+- `--book-workers` / `SEEDER_BOOK_WORKERS` default `10`
+- `--batch-size` / `SEEDER_BATCH_SIZE` default `10`
+- `--worker-sleep` / `SEEDER_WORKER_SLEEP` default `250ms`
+- `--request-timeout` / `SEEDER_REQUEST_TIMEOUT` default `5s`
+- `--shutdown-timeout` / `SEEDER_SHUTDOWN_TIMEOUT` default `20s`
+- `--progress-interval` / `SEEDER_PROGRESS_INTERVAL` default `10s`
+- `--log-level` / `SEEDER_LOG_LEVEL` default `info`
+- `--retry-attempts` / `SEEDER_RETRY_ATTEMPTS` default `5`
+- `--retry-initial-backoff` / `SEEDER_RETRY_INITIAL_BACKOFF` default `500ms`
+- `--retry-max-backoff` / `SEEDER_RETRY_MAX_BACKOFF` default `5s`
+- `--retry-jitter` / `SEEDER_RETRY_JITTER` default `0.20`
+- `--telemetry-enabled` / `SEEDER_TELEMETRY_ENABLED` default `true`
+- `--otel-service-name` / `SEEDER_OTEL_SERVICE_NAME` default `solr-seeder`
+- `--otel-exporter-endpoint` / `SEEDER_OTEL_EXPORTER_ENDPOINT` default `http://localhost:4318`
+- `--otel-trace-sample-ratio` / `SEEDER_OTEL_TRACE_SAMPLE_RATIO` default `0.10`
+- `--metrics-listen-addr` / `SEEDER_METRICS_LISTEN_ADDR` default `:9464`
+
+Example:
+
+```bash
+go -C app run ./cmd/seeder \
+  --solr-base-url=http://localhost:8983/solr \
+  --batch-size=20 \
+  --worker-sleep=100ms \
+  --otel-trace-sample-ratio=0.25 \
+  --log-level=debug
+```
+
+Stop the seeder with `Ctrl-C`. It stops generating new work, lets in-flight requests finish within the shutdown timeout, and then exits cleanly.
+
+## Verifying seeder observability
+
+With the stack up and the seeder running:
+
+1. Check that the local metrics endpoint is serving seeder metrics:
+
+```bash
+make seeder-metrics
+```
+
+2. Check that Prometheus can see the seeder target:
+
+```bash
+curl "http://localhost:9090/api/v1/targets" | grep -A3 solr-seeder
+```
+
+3. Open Grafana and inspect:
+
+- `Solr Overview` for correlation between Solr activity and seeder traffic
+- `Go Seeder Overview` for seeder throughput, failures, retries, latency, workers, and queue depth
+
+4. Open Jaeger and search for the `solr-seeder` service.
+
+## How replication works
+
+- `solr-master` is the only node that receives writes in this lab.
+- Each core on the master exposes `/replication` as a leader.
+- Each core on each follower exposes `/replication` as a follower and polls the master every 5 seconds.
+- The master auto-commit configuration makes new index versions available to followers. The Go seeder does not send commit commands.
+- The helper script `scripts/replication/check-index-versions.sh` compares `indexversion` across all three nodes.
+- Followers are made read-only for application traffic by overriding Solr's implicit `/update` handler with a built-in 404 handler in their core configs.
+
+Replication is asynchronous. Followers are intended to be query nodes, and this lab rejects direct writes to them while still allowing replication.
+
+## How observability works
+
+- Solr loads the `opentelemetry` module from the official `solr:10.0.0` image.
+- `solr.xml` enables `OtelTracerConfigurator`.
+- Each Solr node exports OTLP traces to the OTEL Collector.
+- The host-run Go seeder exports OTLP traces to the same OTEL Collector over `http://localhost:4318`.
+- The OTEL Collector forwards traces to Jaeger.
+- The collector health extension is exposed on `localhost:13133` and is used by the local readiness checks.
+- Prometheus scrapes each Solr node directly from `/solr/admin/metrics?wt=openmetrics`.
+- Prometheus also scrapes the host-run Go seeder from `http://host.docker.internal:9464/metrics` inside the Prometheus container.
+- Grafana is provisioned with both Prometheus and Jaeger datasources and loads dashboards from the repo, including a dedicated `Go Seeder Overview` dashboard.
+
+## Common commands
+
+```bash
+make help
+make up
+make down
+make restart
+make logs
+make build-seeder
+make run-seeder
+make run-seeder-fast
+make test-seeder
+make lint-seeder
+make seeder-metrics
+make smoke-test
+make recreate-cores
+make clean
+```
+
+## Sample queries
+
+Query recent movie documents on the master:
+
+```bash
+curl "http://localhost:8983/solr/movies/select?q=*:*&rows=5&sort=release_year desc&wt=json&indent=true"
+```
+
+Query movie documents from follower 1:
+
+```bash
+curl "http://localhost:8984/solr/movies/select?q=*:*&rows=5&sort=release_year desc&wt=json&indent=true"
+```
+
+Query book documents from follower 2:
+
+```bash
+curl "http://localhost:8985/solr/books/select?q=*:*&rows=5&sort=publication_year desc&wt=json&indent=true"
+```
+
+Check per-core replication status manually:
+
+```bash
+curl "http://localhost:8983/solr/movies/replication?command=details&wt=json"
+curl "http://localhost:8984/solr/movies/replication?command=details&wt=json"
+```
+
+Follower writes should fail:
+
+```bash
+curl -i -H 'Content-Type: application/json' \
+  --data-binary '[{"id":"should-fail","title":"blocked"}]' \
+  "http://localhost:8984/solr/movies/update?commit=true"
+```
+
+## Troubleshooting
+
+- If `make up` fails, inspect `docker compose logs -f`.
+- If `scripts/wait-for-stack.sh` stops at the collector, inspect `http://localhost:13133/` and `docker compose logs -f otel-collector`.
+- If the Solr nodes are up but a core is missing, run `scripts/solr/check-cores.sh`.
+- If replication lags, run `scripts/replication/check-index-versions.sh` and inspect the follower `/replication?command=details` output.
+- If traces do not appear in Jaeger, check `docker compose logs -f otel-collector` and verify the Solr requests are actually hitting the nodes.
+- If the seeder cannot reach the master, confirm `http://localhost:8983/solr/admin/info/health` is healthy and rerun `make run-seeder` with `SEEDER_LOG_LEVEL=debug`.
+- If the seeder metrics do not appear in Grafana, first confirm `http://localhost:9464/metrics` works locally and then check the `solr-seeder` target in Prometheus.
+- If you change `SEEDER_METRICS_LISTEN_ADDR`, update `observability/prometheus/prometheus.yml` to match the new port before expecting Grafana panels to work.
+- If you change Solr core configs and want a clean Solr-only restart, run `make recreate-cores`. This preserves Prometheus and Grafana data.
+- If you want to wipe everything, including Grafana and Prometheus state, run `make clean`.
+
+## Core schemas
+
+`movies` fields:
+
+- `id`
+- `title`
+- `synopsis`
+- `genre`
+- `release_year`
+- `director`
+- `cast`
+- `language`
+- `runtime_minutes`
+- `rating`
+
+`books` fields:
+
+- `id`
+- `title`
+- `summary`
+- `author`
+- `genre`
+- `isbn`
+- `publication_year`
+- `language`
+- `page_count`
+- `rating`
+
+## Solr 10 notes
+
+- This lab uses the official `solr:10.0.0` image as the base for the custom image.
+- The base image already contains the `opentelemetry` module.
+- The collector image is wrapped locally only to add a tiny HTTP client for Docker health checks against the existing health endpoint.
+- Core data lives under `/var/solr/data`.
+- The custom init script precreates `movies` and `books` on first boot and then replaces the core `conf/` directories from the repo on every restart so stale files do not linger in named volumes.
+
+## Next learning steps
+
+- Add authentication and TLS.
+- Add another follower and compare replication lag.
+- Compare this user-managed setup with a small SolrCloud deployment.
+- Add more fields, copyField rules, or language-specific analyzers.
+- Extend the standalone seeder with more pacing profiles or another core.

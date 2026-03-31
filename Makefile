@@ -1,97 +1,89 @@
-# Makefile for Docker Compose monitoring stack
+SHELL := /usr/bin/env bash
 
-.PHONY: help up down build rebuild logs restart clean status shell-prometheus shell-grafana shell-nginx
+DOCKER_COMPOSE := docker compose
+SERVICE ?=
 
-# Default target
+.PHONY: help build up down restart logs clean build-seeder run-seeder run-seeder-fast test-seeder lint-seeder seeder-metrics smoke-test recreate-cores open-grafana open-jaeger open-solr-master open-solr-slave1 open-solr-slave2
+
 help:
-	@echo "Available commands:"
-	@echo "  up              - Start all services"
-	@echo "  down            - Stop all services"
-	@echo "  build           - Build all services"
-	@echo "  rebuild         - Rebuild and start all services"
-	@echo "  logs            - Show logs from all services"
-	@echo "  logs-prometheus - Show Prometheus logs"
-	@echo "  logs-grafana    - Show Grafana logs"
-	@echo "  logs-nginx      - Show Nginx logs"
-	@echo "  restart         - Restart all services"
-	@echo "  restart-prometheus - Restart Prometheus"
-	@echo "  restart-grafana    - Restart Grafana"
-	@echo "  restart-nginx      - Restart Nginx"
-	@echo "  clean           - Remove all containers and volumes"
-	@echo "  status          - Show status of all services"
-	@echo "  shell-prometheus - Open shell in Prometheus container"
-	@echo "  shell-grafana    - Open shell in Grafana container"
-	@echo "  shell-nginx      - Open shell in Nginx container"
+	@printf '%s\n' \
+		'build           Build the custom Solr image and Compose services' \
+		'up              Start the full lab with docker compose up --build -d --wait' \
+		'down            Stop the lab without removing volumes' \
+		'restart         Restart all services and wait for health checks' \
+		'logs            Tail docker compose logs (optional: SERVICE=<service>)' \
+		'clean           Stop the lab and remove all named volumes' \
+		'build-seeder    Build the standalone Go seeder under app/bin/' \
+		'run-seeder      Run the standalone Go seeder against the local Solr master' \
+		'run-seeder-fast Run the seeder with a faster local learning profile' \
+		'test-seeder     Run the Go seeder test suite' \
+		'lint-seeder     Run go vet for the seeder module' \
+		'seeder-metrics  Print the exported Go seeder Prometheus metrics' \
+		'smoke-test      Run the end-to-end smoke test' \
+		'recreate-cores  Reset only the Solr core volumes and bring the stack back up' \
+		'open-grafana    Open the Grafana UI in a browser' \
+		'open-jaeger     Open the Jaeger UI in a browser' \
+		'open-solr-master Open the Solr admin UI for the master node' \
+		'open-solr-slave1 Open the Solr admin UI for follower 1' \
+		'open-solr-slave2 Open the Solr admin UI for follower 2'
 
-# Start services
-up:
-	docker-compose up -d
-
-# Stop services
-down:
-	docker-compose down
-
-# Build services
 build:
-	docker-compose build
+	$(DOCKER_COMPOSE) build
 
-# Rebuild and start services
-rebuild: down build up
+up:
+	$(DOCKER_COMPOSE) up --build -d --wait
 
-# Show logs
-logs:
-	docker-compose logs -f
+down:
+	$(DOCKER_COMPOSE) down
 
-logs-prometheus:
-	docker-compose logs -f prometheus
-
-logs-grafana:
-	docker-compose logs -f grafana
-
-logs-nginx:
-	docker-compose logs -f nginx
-
-# Restart services
 restart:
-	docker-compose restart
+	$(DOCKER_COMPOSE) restart
+	./scripts/wait-for-stack.sh
 
-restart-prometheus:
-	docker-compose restart prometheus
+logs:
+	$(DOCKER_COMPOSE) logs -f $(SERVICE)
 
-restart-grafana:
-	docker-compose restart grafana
-
-restart-nginx:
-	docker-compose restart nginx
-
-# Clean up (removes containers and volumes)
 clean:
-	docker-compose down -v --remove-orphans
-	docker system prune -f
+	$(DOCKER_COMPOSE) down -v --remove-orphans
 
-# Show status
-status:
-	docker-compose ps
+build-seeder:
+	mkdir -p app/bin
+	go -C app build -o bin/seeder ./cmd/seeder
 
-# Shell access
-shell-prometheus:
-	docker-compose exec prometheus sh
+run-seeder:
+	./scripts/wait-for-stack.sh
+	go -C app run ./cmd/seeder
 
-shell-grafana:
-	docker-compose exec grafana sh
+run-seeder-fast:
+	./scripts/wait-for-stack.sh
+	go -C app run ./cmd/seeder --batch-size=25 --worker-sleep=0ms --progress-interval=5s --otel-trace-sample-ratio=0.02
 
-shell-nginx:
-	docker-compose exec nginx sh
+test-seeder:
+	go -C app test ./...
 
-# Quick development commands
-dev-up: up logs
+lint-seeder:
+	go -C app vet ./...
 
-dev-down: down
+seeder-metrics:
+	curl -fsS http://localhost:9464/metrics | rg '^seeder_'
 
-# Monitoring URLs
-urls:
-	@echo "Service URLs:"
-	@echo "  Grafana (via Nginx): http://localhost"
-	@echo "  Grafana (direct):     http://localhost:3000"
-	@echo "  Prometheus:           http://localhost:9090"
-	@echo "  Nginx health check:   http://localhost/health"
+smoke-test:
+	./scripts/smoke-test.sh
+
+recreate-cores:
+	./scripts/solr/recreate-cores.sh
+
+open-grafana:
+	./scripts/open-url.sh http://localhost:3000
+
+open-jaeger:
+	./scripts/open-url.sh http://localhost:16686
+
+open-solr-master:
+	./scripts/open-url.sh http://localhost:8983/solr
+
+open-solr-slave1:
+	./scripts/open-url.sh http://localhost:8984/solr
+
+open-solr-slave2:
+	./scripts/open-url.sh http://localhost:8985/solr

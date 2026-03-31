@@ -1,180 +1,223 @@
-version: "3.8"
-
 services:
-  # ZooKeeper (single node). For HA, use a 3-node ensemble in production.
-  zookeeper:
-    image: zookeeper:3.8
-    container_name: zookeeper
-    restart: unless-stopped
-    ports:
-      - "2181:2181"
-      - "7000:7000" # Prometheus metrics port
+  jaeger:
+    image: ${JAEGER_IMAGE:-cr.jaegertracing.io/jaegertracing/jaeger:2.16.0}
+    container_name: jaeger
     networks:
-      - solr
-      - monitoring
-    volumes:
-      - zk_data:/data
-      - zk_datalog:/datalog
-      - ./zookeeper/conf/zoo.cfg:/conf/zoo.cfg
+      - solr-lab
+    ports:
+      - "16686:16686"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:16686/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
-  # Solr nodes in SolrCloud mode (connect to ZooKeeper)
-  solr-master:
-    build: ./solr
-    container_name: solr-master
-    restart: unless-stopped
-    ports:
-      - "8986:8983" # Admin UI/API
-      - "9991:9983" # Exporter metrics (temporary)
-    environment:
-      - SOLR_HEAP=1g
-      # GC logs (Java 17+, Solr defaults to G1 GC)
-      - GC_LOG_OPTS=-Xlog:gc*:file=/var/solr/logs/gc.log:time,uptime,level,tags:filecount=10,filesize=32M
-    depends_on:
-      - zookeeper
-    ulimits:
-      nofile:
-        soft: 65536
-        hard: 65536
-    volumes:
-      - solr_master_data:/var/solr
+  otel-collector:
+    build:
+      context: .
+      dockerfile: docker/otel-collector/Dockerfile
+      args:
+        OTEL_COLLECTOR_BASE_IMAGE: ${OTEL_COLLECTOR_IMAGE:-otel/opentelemetry-collector-contrib:0.148.0}
+    image: ${OTEL_COLLECTOR_CUSTOM_IMAGE:-otel-collector-user-managed-lab:0.148.0}
+    pull_policy: never
+    container_name: otel-collector
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
     networks:
-      - solr
-      - monitoring
+      - solr-lab
+    ports:
+      - "13133:13133"
+      - "4318:4318"
+    volumes:
+      - ./observability/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    depends_on:
+      jaeger:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/bin/busybox", "wget", "-q", "-O", "-", "http://localhost:13133/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  solr-master:
+    build:
+      context: .
+      dockerfile: docker/solr/Dockerfile
+      args:
+        SOLR_BASE_IMAGE: ${SOLR_BASE_IMAGE:-solr:10.0.0}
+    image: ${SOLR_CUSTOM_IMAGE:-solr-user-managed-lab:10.0.0}
+    pull_policy: never
+    container_name: solr-master
+    init: true
+    command: ["solr-foreground", "--user-managed"]
+    networks:
+      - solr-lab
+    ports:
+      - "8983:8983"
+    environment:
+      SOLR_NODE_ROLE: master
+      SOLR_MODULES: opentelemetry
+      SOLR_HEAP: 512m
+      SOLR_OPTS: -Dsolr.alwaysOnTraceId=true
+      OTEL_SERVICE_NAME: solr-master
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_TRACES_SAMPLER: parentbased_always_on
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=local,service.namespace=solr-lab,solr.node.role=master
+    volumes:
+      - solr_master_var:/var/solr
+    depends_on:
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8983/solr/admin/info/health | grep -Eq '\"status\"[[:space:]]*:[[:space:]]*\"OK\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 40s
 
   solr-slave1:
-    build: ./solr
+    image: ${SOLR_CUSTOM_IMAGE:-solr-user-managed-lab:10.0.0}
+    pull_policy: never
     container_name: solr-slave1
-    restart: unless-stopped
-    ports:
-      - "8987:8983"
-      - "9992:9983" # Exporter metrics (temporary)
-    environment:
-      - SOLR_HEAP=1g
-      - GC_LOG_OPTS=-Xlog:gc*:file=/var/solr/logs/gc.log:time,uptime,level,tags:filecount=10,filesize=32M
-    depends_on:
-      - zookeeper
-    ulimits:
-      nofile:
-        soft: 65536
-        hard: 65536
-    volumes:
-      - solr_slave1_data:/var/solr
+    init: true
+    command: ["solr-foreground", "--user-managed"]
     networks:
-      - solr
-      - monitoring
+      - solr-lab
+    ports:
+      - "8984:8983"
+    environment:
+      SOLR_NODE_ROLE: follower
+      SOLR_MODULES: opentelemetry
+      SOLR_HEAP: 512m
+      # Followers need allowUrls so ReplicationHandler can reach the master in user-managed mode.
+      SOLR_OPTS: -Dsolr.alwaysOnTraceId=true -Dsolr.security.allow.urls=http://solr-master:8983
+      OTEL_SERVICE_NAME: solr-slave1
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_TRACES_SAMPLER: parentbased_always_on
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=local,service.namespace=solr-lab,solr.node.role=follower
+    volumes:
+      - solr_slave1_var:/var/solr
+    depends_on:
+      otel-collector:
+        condition: service_healthy
+      solr-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8983/solr/admin/info/health | grep -Eq '\"status\"[[:space:]]*:[[:space:]]*\"OK\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 40s
 
   solr-slave2:
-    build: ./solr
+    image: ${SOLR_CUSTOM_IMAGE:-solr-user-managed-lab:10.0.0}
+    pull_policy: never
     container_name: solr-slave2
-    restart: unless-stopped
+    init: true
+    command: ["solr-foreground", "--user-managed"]
+    networks:
+      - solr-lab
     ports:
-      - "8988:8983"
-      - "9993:9983" # Exporter metrics (temporary)
+      - "8985:8983"
     environment:
-      - SOLR_HEAP=1g
-      - GC_LOG_OPTS=-Xlog:gc*:file=/var/solr/logs/gc.log:time,uptime,level,tags:filecount=10,filesize=32M
-    depends_on:
-      - zookeeper
-    ulimits:
-      nofile:
-        soft: 65536
-        hard: 65536
+      SOLR_NODE_ROLE: follower
+      SOLR_MODULES: opentelemetry
+      SOLR_HEAP: 512m
+      # Followers need allowUrls so ReplicationHandler can reach the master in user-managed mode.
+      SOLR_OPTS: -Dsolr.alwaysOnTraceId=true -Dsolr.security.allow.urls=http://solr-master:8983
+      OTEL_SERVICE_NAME: solr-slave2
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_TRACES_SAMPLER: parentbased_always_on
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=local,service.namespace=solr-lab,solr.node.role=follower
     volumes:
-      - solr_slave2_data:/var/solr
-    networks:
-      - solr
-      - monitoring
-
-
-  solr-config-uploader:
-    build: ./solr
-    container_name: solr-config-uploader
-    restart: "no"
+      - solr_slave2_var:/var/solr
     depends_on:
-      - zookeeper
-    networks:
-      - solr
-    command: >
-      bash -lc 'set -e; echo "Uploading configsets to ZooKeeper..."; bin/solr zk upconfig -n movies -d /opt/solr/server/solr/configsets/movies/conf -z zookeeper:2181; bin/solr zk upconfig -n users -d /opt/solr/server/solr/configsets/users/conf -z zookeeper:2181; echo "Configsets uploaded.";'
-
-  # One-off init job to create collections (movies, users) using provided configsets
-  solr-init:
-    image: curlimages/curl:8.10.1
-    container_name: solr-init
-    depends_on:
-      - solr-master
-      - solr-slave1
-      - solr-slave2
-      - solr-config-uploader
-    networks:
-      - solr
-    # Wait for Solr to be up, then create collections in SolrCloud using the copied configsets ("movies", "users")
-    command: >
-      sh -lc 'set -e; echo "Waiting for Solr to be ready..."; until curl -sSf "http://solr-master:8983/solr/admin/collections?action=CLUSTERSTATUS&wt=json" >/dev/null; do sleep 3; done; echo "Creating collections if not exist..."; list=$$(curl -s "http://solr-master:8983/solr/admin/collections?action=LIST&wt=json"); create_if_missing() { name="$$1"; config="$$2"; shards="$$3"; rf="$$4"; case "$$list" in *"\"$${name}\""*) echo "Collection $${name} already exists";; *) curl -sS "http://solr-master:8983/solr/admin/collections?action=CREATE&name=$${name}&collection.configName=$${config}&numShards=$${shards}&replicationFactor=$${rf}&maxShardsPerNode=2&wt=json" && echo "Created collection $${name}";; esac; }; create_if_missing movies movies 2 2; create_if_missing users users 2 2; echo "Done."'
+      otel-collector:
+        condition: service_healthy
+      solr-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8983/solr/admin/info/health | grep -Eq '\"status\"[[:space:]]*:[[:space:]]*\"OK\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 40s
 
   prometheus:
-    image: prom/prometheus:latest
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.10.0}
     container_name: prometheus
-    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --enable-feature=exemplar-storage
+    networks:
+      - solr-lab
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-      - "--web.console.libraries=/etc/prometheus/console_libraries"
-      - "--web.console.templates=/etc/prometheus/consoles"
-      - "--storage.tsdb.retention.time=200h"
-      - "--web.enable-lifecycle"
-    networks:
-      - monitoring
+    depends_on:
+      solr-master:
+        condition: service_healthy
+      solr-slave1:
+        condition: service_healthy
+      solr-slave2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:9090/-/healthy >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   grafana:
-    image: grafana/grafana:latest
+    image: ${GRAFANA_IMAGE:-grafana/grafana:12.4.2}
     container_name: grafana
-    restart: unless-stopped
+    networks:
+      - solr-lab
     ports:
       - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=http://localhost/grafana/
-      - GF_SERVER_SERVE_FROM_SUB_PATH=true
-    networks:
-      - monitoring
+      - ./observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./observability/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
-      - prometheus
-
-  nginx:
-    image: nginx:alpine
-    container_name: nginx
-    restart: unless-stopped
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
-    depends_on:
-      - grafana
-    networks:
-      - monitoring
+      prometheus:
+        condition: service_healthy
+      jaeger:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
 
 volumes:
-  zk_data:
-  zk_datalog:
+  solr_master_var:
+  solr_slave1_var:
+  solr_slave2_var:
   prometheus_data:
   grafana_data:
-  solr_master_data:
-  solr_slave1_data:
-  solr_slave2_data:
 
 networks:
-  monitoring:
-    driver: bridge
-  solr:
-    driver: bridge
+  solr-lab:
+    name: solr-lab

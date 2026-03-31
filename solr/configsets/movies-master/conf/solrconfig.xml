@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<config>
+  <luceneMatchVersion>10.3</luceneMatchVersion>
+  <dataDir>${solr.data.dir:}</dataDir>
+
+  <schemaFactory class="ManagedIndexSchemaFactory">
+    <bool name="mutable">false</bool>
+    <str name="managedSchemaResourceName">managed-schema.xml</str>
+  </schemaFactory>
+
+  <directoryFactory name="DirectoryFactory" class="${solr.directoryFactory:solr.NRTCachingDirectoryFactory}"/>
+  <codecFactory class="solr.SchemaCodecFactory"/>
+
+  <updateHandler class="solr.DirectUpdateHandler2">
+    <updateLog>
+      <str name="dir">${solr.ulog.dir:}</str>
+    </updateLog>
+    <autoCommit>
+      <maxTime>15000</maxTime>
+      <openSearcher>false</openSearcher>
+    </autoCommit>
+    <autoSoftCommit>
+      <maxTime>3000</maxTime>
+    </autoSoftCommit>
+  </updateHandler>
+
+  <query>
+    <maxBooleanClauses>1024</maxBooleanClauses>
+    <filterCache size="256" initialSize="256" autowarmCount="0"/>
+    <queryResultCache size="256" initialSize="256" autowarmCount="0"/>
+    <documentCache size="256" initialSize="256" autowarmCount="0"/>
+    <enableLazyFieldLoading>true</enableLazyFieldLoading>
+    <queryResultWindowSize>20</queryResultWindowSize>
+    <queryResultMaxDocsCached>200</queryResultMaxDocsCached>
+    <useColdSearcher>false</useColdSearcher>
+  </query>
+
+  <requestDispatcher>
+    <httpCaching never304="true"/>
+  </requestDispatcher>
+
+  <requestHandler name="/select" class="solr.SearchHandler">
+    <lst name="defaults">
+      <str name="echoParams">explicit</str>
+      <str name="defType">edismax</str>
+      <str name="qf">title^5 synopsis^1.5 genre^2 director^2 cast^3 language^1.5</str>
+      <str name="df">title</str>
+      <int name="rows">10</int>
+    </lst>
+  </requestHandler>
+
+  <requestHandler name="/query" class="solr.SearchHandler">
+    <lst name="defaults">
+      <str name="echoParams">explicit</str>
+      <str name="wt">json</str>
+      <str name="indent">true</str>
+      <str name="defType">edismax</str>
+      <str name="qf">title^5 synopsis^1.5 genre^2 director^2 cast^3 language^1.5</str>
+      <str name="df">title</str>
+      <int name="rows">10</int>
+    </lst>
+  </requestHandler>
+
+  <!-- The master is the only write node in this lab. -->
+  <requestHandler name="/update" class="solr.UpdateRequestHandler"/>
+
+  <requestHandler name="/replication" class="solr.ReplicationHandler">
+    <!-- Followers poll this core after hard commits and on startup. -->
+    <lst name="leader">
+      <str name="replicateAfter">commit</str>
+      <str name="replicateAfter">startup</str>
+    </lst>
+    <!-- Keep commit files around long enough for followers polling every 5 seconds to fetch them safely. -->
+    <str name="commitReserveDuration">00:00:30</str>
+  </requestHandler>
+</config>

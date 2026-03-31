@@ -1,2 +1,3 @@
-# Solr data folder
-solr/data
+.env
+.DS_Store
+app/bin/
