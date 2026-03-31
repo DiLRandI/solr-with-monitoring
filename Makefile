@@ -3,7 +3,7 @@ SHELL := /usr/bin/env bash
 DOCKER_COMPOSE := docker compose
 SERVICE ?=
 
-.PHONY: help build up down restart logs clean seed smoke-test recreate-cores open-grafana open-jaeger open-solr-master open-solr-slave1 open-solr-slave2
+.PHONY: help build up down restart logs clean build-seeder run-seeder run-seeder-fast test-seeder lint-seeder smoke-test recreate-cores open-grafana open-jaeger open-solr-master open-solr-slave1 open-solr-slave2
 
 help:
 	@printf '%s\n' \
@@ -13,7 +13,11 @@ help:
 		'restart         Restart all services and wait for health checks' \
 		'logs            Tail docker compose logs (optional: SERVICE=<service>)' \
 		'clean           Stop the lab and remove all named volumes' \
-		'seed            Index the sample books and movies documents into the master' \
+		'build-seeder    Build the standalone Go seeder under app/bin/' \
+		'run-seeder      Run the standalone Go seeder against the local Solr master' \
+		'run-seeder-fast Run the seeder with a faster local learning profile' \
+		'test-seeder     Run the Go seeder test suite' \
+		'lint-seeder     Run go vet for the seeder module' \
 		'smoke-test      Run the end-to-end smoke test' \
 		'recreate-cores  Reset only the Solr core volumes and bring the stack back up' \
 		'open-grafana    Open the Grafana UI in a browser' \
@@ -41,8 +45,23 @@ logs:
 clean:
 	$(DOCKER_COMPOSE) down -v --remove-orphans
 
-seed:
-	./scripts/seed/seed-all.sh
+build-seeder:
+	mkdir -p app/bin
+	go -C app build -o bin/seeder ./cmd/seeder
+
+run-seeder:
+	./scripts/wait-for-stack.sh
+	go -C app run ./cmd/seeder
+
+run-seeder-fast:
+	./scripts/wait-for-stack.sh
+	go -C app run ./cmd/seeder --batch-size=25 --worker-sleep=0ms --progress-interval=5s
+
+test-seeder:
+	go -C app test ./...
+
+lint-seeder:
+	go -C app vet ./...
 
 smoke-test:
 	./scripts/smoke-test.sh
