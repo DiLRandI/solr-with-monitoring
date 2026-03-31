@@ -43,6 +43,9 @@ sync_core_conf() {
     /opt/solr/docker/scripts/precreate-core "$core" "$config_source"
   fi
 
+  # The repo owns each core's conf/ directory. Replacing it entirely keeps persistent
+  # volumes deterministic and removes stale files when configs disappear from git.
+  rm -rf "$conf_dir"
   mkdir -p "$conf_dir"
   cp -a "$config_source/conf/." "$conf_dir/"
 }
@@ -52,4 +55,3 @@ sync_solr_xml
 for core in movies books; do
   sync_core_conf "$core" "$(configset_for_core "$core")"
 done
-

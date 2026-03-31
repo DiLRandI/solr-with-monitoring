@@ -60,6 +60,7 @@ Useful URLs:
 - Solr master: `http://localhost:8983/solr`
 - Solr slave 1: `http://localhost:8984/solr`
 - Solr slave 2: `http://localhost:8985/solr`
+- OTEL Collector health: `http://localhost:13133/`
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3000`
 - Jaeger: `http://localhost:16686`
@@ -81,8 +82,9 @@ Grafana defaults to `admin / admin` unless you override `.env`.
 - Each core on each follower exposes `/replication` as a follower and polls the master every 5 seconds.
 - A hard commit on the master makes the new index version available to followers.
 - The helper script `scripts/replication/check-index-versions.sh` compares `indexversion` across all three nodes.
+- Followers are made read-only for application traffic by overriding Solr's implicit `/update` handler with a built-in 404 handler in their core configs.
 
-Replication is asynchronous. Followers are intended to be query nodes, but this lab does not hard-block writes to them.
+Replication is asynchronous. Followers are intended to be query nodes, and this lab now rejects direct writes to them while still allowing replication.
 
 ## How observability works
 
@@ -90,6 +92,7 @@ Replication is asynchronous. Followers are intended to be query nodes, but this 
 - `solr.xml` enables `OtelTracerConfigurator`.
 - Each Solr node exports OTLP traces to the OTEL Collector.
 - The OTEL Collector forwards traces to Jaeger.
+- The collector health extension is exposed on `localhost:13133` and is used by the local readiness checks.
 - Prometheus scrapes each Solr node directly from `/solr/admin/metrics?wt=openmetrics`.
 - Grafana is provisioned with both Prometheus and Jaeger datasources and loads dashboards from the repo.
 
@@ -134,13 +137,22 @@ curl "http://localhost:8983/solr/movies/replication?command=details&wt=json"
 curl "http://localhost:8984/solr/movies/replication?command=details&wt=json"
 ```
 
+Follower writes should fail:
+
+```bash
+curl -i -H 'Content-Type: application/json' \
+  --data-binary '[{"id":"should-fail","title":"blocked"}]' \
+  "http://localhost:8984/solr/movies/update?commit=true"
+```
+
 ## Troubleshooting
 
 - If `make up` fails, inspect `docker compose logs -f`.
+- If `scripts/wait-for-stack.sh` stops at the collector, inspect `http://localhost:13133/` and `docker compose logs -f otel-collector`.
 - If the Solr nodes are up but a core is missing, run `scripts/solr/check-cores.sh`.
 - If replication lags, run `scripts/replication/check-index-versions.sh` and inspect the follower `/replication?command=details` output.
 - If traces do not appear in Jaeger, check `docker compose logs -f otel-collector` and verify the Solr requests are actually hitting the nodes.
-- If you change Solr core configs and want a completely clean restart, run `make recreate-cores`.
+- If you change Solr core configs and want a clean Solr-only restart, run `make recreate-cores`. This preserves Prometheus and Grafana data.
 - If you want to wipe everything, including Grafana and Prometheus state, run `make clean`.
 
 ## Core schemas
@@ -175,8 +187,9 @@ curl "http://localhost:8984/solr/movies/replication?command=details&wt=json"
 
 - This lab uses the official `solr:10.0.0` image as the base for the custom image.
 - The base image already contains the `opentelemetry` module.
+- The collector image is wrapped locally only to add a tiny HTTP client for Docker health checks against the existing health endpoint.
 - Core data lives under `/var/solr/data`.
-- The custom init script precreates `movies` and `books` on first boot and then keeps the core `conf/` directories in sync with the image.
+- The custom init script precreates `movies` and `books` on first boot and then replaces the core `conf/` directories from the repo on every restart so stale files do not linger in named volumes.
 
 ## Next learning steps
 

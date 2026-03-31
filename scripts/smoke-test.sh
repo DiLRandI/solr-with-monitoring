@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 movie_id="movie-smoke-$(date +%s)"
 book_id="book-smoke-$(date +%s)"
+follower1_reject_id="movie-follower1-reject-$(date +%s)"
+follower2_reject_id="book-follower2-reject-$(date +%s)"
 
 assert_contains() {
   local haystack="$1"
@@ -15,15 +17,41 @@ assert_contains() {
   fi
 }
 
-post_doc() {
-  local core="$1"
-  local json_payload="$2"
+post_doc_expect_success() {
+  local base_url="$1"
+  local core="$2"
+  local json_payload="$3"
   local response
   response="$(curl -fsS \
     -H 'Content-Type: application/json' \
     --data-binary "$json_payload" \
-    "http://localhost:8983/solr/$core/update?commit=true")"
-  assert_contains "$response" '"status":0' "Solr update status for $core should be 0"
+    "$base_url/$core/update?commit=true")"
+  assert_contains "$response" '"status":0' "Solr update status for $base_url/$core should be 0"
+}
+
+post_doc_expect_failure() {
+  local base_url="$1"
+  local core="$2"
+  local json_payload="$3"
+  local response_file
+  local http_code
+
+  response_file="$(mktemp)"
+  http_code="$(curl -sS \
+    -o "$response_file" \
+    -w '%{http_code}' \
+    -H 'Content-Type: application/json' \
+    --data-binary "$json_payload" \
+    "$base_url/$core/update?commit=true")"
+
+  if [[ "$http_code" =~ ^2 ]]; then
+    printf 'Expected write to fail for %s/%s but got HTTP %s\n' "$base_url" "$core" "$http_code" >&2
+    cat "$response_file" >&2
+    rm -f "$response_file"
+    exit 1
+  fi
+
+  rm -f "$response_file"
 }
 
 query_doc() {
@@ -40,8 +68,12 @@ printf 'Checking core creation...\n'
 "$ROOT_DIR/scripts/solr/check-cores.sh"
 
 printf 'Posting smoke documents to the master...\n'
-post_doc "movies" "[{\"id\":\"$movie_id\",\"title\":\"Smoke Test Movie\",\"synopsis\":\"A document created by the smoke test.\",\"genre\":\"Testing\",\"release_year\":2026,\"director\":\"Codex\",\"cast\":[\"Alice Example\",\"Bob Example\"],\"language\":\"English\",\"runtime_minutes\":101,\"rating\":9.4}]"
-post_doc "books" "[{\"id\":\"$book_id\",\"title\":\"Smoke Test Book\",\"summary\":\"A document created by the smoke test.\",\"author\":\"Codex\",\"genre\":\"Testing\",\"isbn\":\"9780000000000\",\"publication_year\":2026,\"language\":\"English\",\"page_count\":256,\"rating\":4.9}]"
+post_doc_expect_success "http://localhost:8983/solr" "movies" "[{\"id\":\"$movie_id\",\"title\":\"Smoke Test Movie\",\"synopsis\":\"A document created by the smoke test.\",\"genre\":\"Testing\",\"release_year\":2026,\"director\":\"Codex\",\"cast\":[\"Alice Example\",\"Bob Example\"],\"language\":\"English\",\"runtime_minutes\":101,\"rating\":9.4}]"
+post_doc_expect_success "http://localhost:8983/solr" "books" "[{\"id\":\"$book_id\",\"title\":\"Smoke Test Book\",\"summary\":\"A document created by the smoke test.\",\"author\":\"Codex\",\"genre\":\"Testing\",\"isbn\":\"9780000000000\",\"publication_year\":2026,\"language\":\"English\",\"page_count\":256,\"rating\":4.9}]"
+
+printf 'Verifying followers reject application writes...\n'
+post_doc_expect_failure "http://localhost:8984/solr" "movies" "[{\"id\":\"$follower1_reject_id\",\"title\":\"Follower Reject Movie\",\"synopsis\":\"This write should fail.\",\"genre\":\"Testing\",\"release_year\":2026,\"director\":\"Codex\",\"cast\":[\"Reject\"],\"language\":\"English\",\"runtime_minutes\":1,\"rating\":1.0}]"
+post_doc_expect_failure "http://localhost:8985/solr" "books" "[{\"id\":\"$follower2_reject_id\",\"title\":\"Follower Reject Book\",\"summary\":\"This write should fail.\",\"author\":\"Codex\",\"genre\":\"Testing\",\"isbn\":\"9781111111111\",\"publication_year\":2026,\"language\":\"English\",\"page_count\":1,\"rating\":1.0}]"
 
 printf 'Verifying the master can read back the new documents...\n'
 assert_contains "$(query_doc 'http://localhost:8983/solr' movies "$movie_id")" "$movie_id" "master should return the smoke movie"
@@ -95,4 +127,3 @@ done
 
 printf 'Timed out waiting for Jaeger traces\n' >&2
 exit 1
-

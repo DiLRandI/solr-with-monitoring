@@ -61,14 +61,16 @@
     </lst>
   </requestHandler>
 
+  <!-- The master is the only write node in this lab. -->
   <requestHandler name="/update" class="solr.UpdateRequestHandler"/>
 
   <requestHandler name="/replication" class="solr.ReplicationHandler">
+    <!-- Followers poll this core after hard commits and on startup. -->
     <lst name="leader">
       <str name="replicateAfter">commit</str>
       <str name="replicateAfter">startup</str>
     </lst>
+    <!-- Keep commit files around long enough for followers polling every 5 seconds to fetch them safely. -->
     <str name="commitReserveDuration">00:00:30</str>
   </requestHandler>
 </config>
-

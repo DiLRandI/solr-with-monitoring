@@ -61,10 +61,13 @@
     </lst>
   </requestHandler>
 
-  <requestHandler name="/update" class="solr.UpdateRequestHandler"/>
+  <!-- /update is implicit in Solr, so followers override it with a 404 handler to stay read-only. -->
+  <requestHandler name="/update" class="org.apache.solr.handler.NotFoundRequestHandler"/>
 
+  <!-- Followers stay query-only for application traffic; replication still fetches index files through /replication. -->
   <requestHandler name="/replication" class="solr.ReplicationHandler">
     <lst name="follower">
+      <!-- leaderUrl points to the core root; ReplicationHandler appends /replication internally. -->
       <str name="leaderUrl">http://solr-master:8983/solr/books</str>
       <str name="pollInterval">00:00:05</str>
       <str name="compression">internal</str>

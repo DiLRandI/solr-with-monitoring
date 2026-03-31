@@ -22,6 +22,7 @@ wait_for() {
 }
 
 wait_for "jaeger" "http://localhost:16686/"
+wait_for "otel-collector" "http://localhost:13133/"
 wait_for "solr-master" "http://localhost:8983/solr/admin/info/health" '"status"[[:space:]]*:[[:space:]]*"OK"'
 wait_for "solr-slave1" "http://localhost:8984/solr/admin/info/health" '"status"[[:space:]]*:[[:space:]]*"OK"'
 wait_for "solr-slave2" "http://localhost:8985/solr/admin/info/health" '"status"[[:space:]]*:[[:space:]]*"OK"'

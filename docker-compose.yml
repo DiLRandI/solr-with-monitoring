@@ -14,18 +14,26 @@ services:
       start_period: 10s
 
   otel-collector:
-    image: ${OTEL_COLLECTOR_IMAGE:-otel/opentelemetry-collector-contrib:0.148.0}
+    build:
+      context: .
+      dockerfile: docker/otel-collector/Dockerfile
+      args:
+        OTEL_COLLECTOR_BASE_IMAGE: ${OTEL_COLLECTOR_IMAGE:-otel/opentelemetry-collector-contrib:0.148.0}
+    image: ${OTEL_COLLECTOR_CUSTOM_IMAGE:-otel-collector-user-managed-lab:0.148.0}
+    pull_policy: never
     container_name: otel-collector
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     networks:
       - solr-lab
+    ports:
+      - "13133:13133"
     volumes:
       - ./observability/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
     depends_on:
       jaeger:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "/otelcol-contrib", "--version"]
+      test: ["CMD", "/bin/busybox", "wget", "-q", "-O", "-", "http://localhost:13133/"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -84,7 +92,8 @@ services:
       SOLR_NODE_ROLE: follower
       SOLR_MODULES: opentelemetry
       SOLR_HEAP: 512m
-      SOLR_OPTS: -Dsolr.alwaysOnTraceId=true
+      # Followers need allowUrls so ReplicationHandler can reach the master in user-managed mode.
+      SOLR_OPTS: -Dsolr.alwaysOnTraceId=true -Dsolr.security.allow.urls=http://solr-master:8983
       OTEL_SERVICE_NAME: solr-slave1
       OTEL_TRACES_EXPORTER: otlp
       OTEL_METRICS_EXPORTER: none
@@ -120,7 +129,8 @@ services:
       SOLR_NODE_ROLE: follower
       SOLR_MODULES: opentelemetry
       SOLR_HEAP: 512m
-      SOLR_OPTS: -Dsolr.alwaysOnTraceId=true
+      # Followers need allowUrls so ReplicationHandler can reach the master in user-managed mode.
+      SOLR_OPTS: -Dsolr.alwaysOnTraceId=true -Dsolr.security.allow.urls=http://solr-master:8983
       OTEL_SERVICE_NAME: solr-slave2
       OTEL_TRACES_EXPORTER: otlp
       OTEL_METRICS_EXPORTER: none

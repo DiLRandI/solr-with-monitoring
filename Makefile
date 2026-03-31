@@ -15,7 +15,7 @@ help:
 		'clean           Stop the lab and remove all named volumes' \
 		'seed            Index the sample books and movies documents into the master' \
 		'smoke-test      Run the end-to-end smoke test' \
-		'recreate-cores  Recreate the Solr data volumes and bring the stack back up' \
+		'recreate-cores  Reset only the Solr core volumes and bring the stack back up' \
 		'open-grafana    Open the Grafana UI in a browser' \
 		'open-jaeger     Open the Jaeger UI in a browser' \
 		'open-solr-master Open the Solr admin UI for the master node' \
@@ -64,4 +64,3 @@ open-solr-slave1:
 
 open-solr-slave2:
 	./scripts/open-url.sh http://localhost:8985/solr
-
