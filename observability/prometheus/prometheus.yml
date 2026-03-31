@@ -29,3 +29,10 @@ scrape_configs:
       - targets:
           - prometheus:9090
 
+  - job_name: solr-seeder
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - host.docker.internal:9464
+        labels:
+          service: solr-seeder

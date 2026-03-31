@@ -85,6 +85,13 @@ func TestPostBatchClassifiesRetryableAndNonRetryableFailures(t *testing.T) {
 			if IsRetryable(err) != tc.retryable {
 				t.Fatalf("expected retryable=%t, got %t (%v)", tc.retryable, IsRetryable(err), err)
 			}
+			expectedFailureType := "http_4xx"
+			if tc.retryable {
+				expectedFailureType = "http_5xx"
+			}
+			if failureType := FailureType(err); failureType != expectedFailureType {
+				t.Fatalf("expected failure type %q, got %q", expectedFailureType, failureType)
+			}
 		})
 	}
 }

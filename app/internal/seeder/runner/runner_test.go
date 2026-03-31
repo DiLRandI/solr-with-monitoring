@@ -62,7 +62,7 @@ func TestRunWritesToBothCoresAndStopsCleanly(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- Run(runCtx, cfg, logger)
+		errCh <- Run(runCtx, cfg, logger, nil)
 	}()
 
 	deadline := time.Now().Add(2 * time.Second)

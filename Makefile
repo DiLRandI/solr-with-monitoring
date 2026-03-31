@@ -3,7 +3,7 @@ SHELL := /usr/bin/env bash
 DOCKER_COMPOSE := docker compose
 SERVICE ?=
 
-.PHONY: help build up down restart logs clean build-seeder run-seeder run-seeder-fast test-seeder lint-seeder smoke-test recreate-cores open-grafana open-jaeger open-solr-master open-solr-slave1 open-solr-slave2
+.PHONY: help build up down restart logs clean build-seeder run-seeder run-seeder-fast test-seeder lint-seeder seeder-metrics smoke-test recreate-cores open-grafana open-jaeger open-solr-master open-solr-slave1 open-solr-slave2
 
 help:
 	@printf '%s\n' \
@@ -18,6 +18,7 @@ help:
 		'run-seeder-fast Run the seeder with a faster local learning profile' \
 		'test-seeder     Run the Go seeder test suite' \
 		'lint-seeder     Run go vet for the seeder module' \
+		'seeder-metrics  Print the exported Go seeder Prometheus metrics' \
 		'smoke-test      Run the end-to-end smoke test' \
 		'recreate-cores  Reset only the Solr core volumes and bring the stack back up' \
 		'open-grafana    Open the Grafana UI in a browser' \
@@ -55,13 +56,16 @@ run-seeder:
 
 run-seeder-fast:
 	./scripts/wait-for-stack.sh
-	go -C app run ./cmd/seeder --batch-size=25 --worker-sleep=0ms --progress-interval=5s
+	go -C app run ./cmd/seeder --batch-size=25 --worker-sleep=0ms --progress-interval=5s --otel-trace-sample-ratio=0.02
 
 test-seeder:
 	go -C app test ./...
 
 lint-seeder:
 	go -C app vet ./...
+
+seeder-metrics:
+	curl -fsS http://localhost:9464/metrics | rg '^seeder_'
 
 smoke-test:
 	./scripts/smoke-test.sh

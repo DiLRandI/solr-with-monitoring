@@ -63,6 +63,35 @@ func IsRetryable(err error) bool {
 	return false
 }
 
+func FailureType(err error) string {
+	var clientErr *ClientError
+	if errors.As(err, &clientErr) {
+		switch {
+		case errors.Is(clientErr.Err, context.Canceled):
+			return "canceled"
+		case errors.Is(clientErr.Err, context.DeadlineExceeded):
+			return "timeout"
+		case clientErr.StatusCode >= http.StatusBadRequest && clientErr.StatusCode < http.StatusInternalServerError:
+			return "http_4xx"
+		case clientErr.StatusCode >= http.StatusInternalServerError:
+			return "http_5xx"
+		case clientErr.Err != nil:
+			return "network"
+		default:
+			return "client"
+		}
+	}
+
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	default:
+		return "unknown"
+	}
+}
+
 func (c *Client) PostBatch(ctx context.Context, core string, docs any) (time.Duration, error) {
 	payload, err := json.Marshal(docs)
 	if err != nil {

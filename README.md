@@ -26,14 +26,18 @@ flowchart LR
     S2[solr-slave2<br/>movies + books]
   end
 
+  A[Go Seeder<br/>host process]
+
   M -- "/replication per core" --> S1
   M -- "/replication per core" --> S2
 
   P[Prometheus] --> G[Grafana]
+  A --> P
   M --> P
   S1 --> P
   S2 --> P
 
+  A -- OTLP traces --> O[OTEL Collector]
   M -- OTLP traces --> O[OTEL Collector]
   S1 -- OTLP traces --> O
   S2 -- OTLP traces --> O
@@ -72,6 +76,7 @@ Useful URLs:
 - Solr master: `http://localhost:8983/solr`
 - Solr follower 1: `http://localhost:8984/solr`
 - Solr follower 2: `http://localhost:8985/solr`
+- Seeder metrics: `http://localhost:9464/metrics`
 - OTEL Collector health: `http://localhost:13133/`
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3000`
@@ -95,6 +100,7 @@ Grafana defaults to `admin / admin` unless you override `.env`.
 - It never sends commit commands. The Solr master's existing auto-commit settings make new index versions available to followers.
 - It runs continuously until it receives `SIGINT` or `SIGTERM`.
 - By default it uses 10 workers for `movies` and 10 workers for `books`, generating realistic random documents for both cores.
+- It exports OTLP traces to the existing OTEL Collector and exposes Prometheus metrics on a local `/metrics` endpoint so the seeder appears in the same Grafana and Jaeger setup as Solr.
 
 Build the binary:
 
@@ -131,6 +137,11 @@ Useful configuration flags and environment variables:
 - `--retry-initial-backoff` / `SEEDER_RETRY_INITIAL_BACKOFF` default `500ms`
 - `--retry-max-backoff` / `SEEDER_RETRY_MAX_BACKOFF` default `5s`
 - `--retry-jitter` / `SEEDER_RETRY_JITTER` default `0.20`
+- `--telemetry-enabled` / `SEEDER_TELEMETRY_ENABLED` default `true`
+- `--otel-service-name` / `SEEDER_OTEL_SERVICE_NAME` default `solr-seeder`
+- `--otel-exporter-endpoint` / `SEEDER_OTEL_EXPORTER_ENDPOINT` default `http://localhost:4318`
+- `--otel-trace-sample-ratio` / `SEEDER_OTEL_TRACE_SAMPLE_RATIO` default `0.10`
+- `--metrics-listen-addr` / `SEEDER_METRICS_LISTEN_ADDR` default `:9464`
 
 Example:
 
@@ -139,10 +150,34 @@ go -C app run ./cmd/seeder \
   --solr-base-url=http://localhost:8983/solr \
   --batch-size=20 \
   --worker-sleep=100ms \
+  --otel-trace-sample-ratio=0.25 \
   --log-level=debug
 ```
 
 Stop the seeder with `Ctrl-C`. It stops generating new work, lets in-flight requests finish within the shutdown timeout, and then exits cleanly.
+
+## Verifying seeder observability
+
+With the stack up and the seeder running:
+
+1. Check that the local metrics endpoint is serving seeder metrics:
+
+```bash
+make seeder-metrics
+```
+
+2. Check that Prometheus can see the seeder target:
+
+```bash
+curl "http://localhost:9090/api/v1/targets" | grep -A3 solr-seeder
+```
+
+3. Open Grafana and inspect:
+
+- `Solr Overview` for correlation between Solr activity and seeder traffic
+- `Go Seeder Overview` for seeder throughput, failures, retries, latency, workers, and queue depth
+
+4. Open Jaeger and search for the `solr-seeder` service.
 
 ## How replication works
 
@@ -160,10 +195,12 @@ Replication is asynchronous. Followers are intended to be query nodes, and this 
 - Solr loads the `opentelemetry` module from the official `solr:10.0.0` image.
 - `solr.xml` enables `OtelTracerConfigurator`.
 - Each Solr node exports OTLP traces to the OTEL Collector.
+- The host-run Go seeder exports OTLP traces to the same OTEL Collector over `http://localhost:4318`.
 - The OTEL Collector forwards traces to Jaeger.
 - The collector health extension is exposed on `localhost:13133` and is used by the local readiness checks.
 - Prometheus scrapes each Solr node directly from `/solr/admin/metrics?wt=openmetrics`.
-- Grafana is provisioned with both Prometheus and Jaeger datasources and loads dashboards from the repo.
+- Prometheus also scrapes the host-run Go seeder from `http://host.docker.internal:9464/metrics` inside the Prometheus container.
+- Grafana is provisioned with both Prometheus and Jaeger datasources and loads dashboards from the repo, including a dedicated `Go Seeder Overview` dashboard.
 
 ## Common commands
 
@@ -178,6 +215,7 @@ make run-seeder
 make run-seeder-fast
 make test-seeder
 make lint-seeder
+make seeder-metrics
 make smoke-test
 make recreate-cores
 make clean
@@ -226,6 +264,8 @@ curl -i -H 'Content-Type: application/json' \
 - If replication lags, run `scripts/replication/check-index-versions.sh` and inspect the follower `/replication?command=details` output.
 - If traces do not appear in Jaeger, check `docker compose logs -f otel-collector` and verify the Solr requests are actually hitting the nodes.
 - If the seeder cannot reach the master, confirm `http://localhost:8983/solr/admin/info/health` is healthy and rerun `make run-seeder` with `SEEDER_LOG_LEVEL=debug`.
+- If the seeder metrics do not appear in Grafana, first confirm `http://localhost:9464/metrics` works locally and then check the `solr-seeder` target in Prometheus.
+- If you change `SEEDER_METRICS_LISTEN_ADDR`, update `observability/prometheus/prometheus.yml` to match the new port before expecting Grafana panels to work.
 - If you change Solr core configs and want a clean Solr-only restart, run `make recreate-cores`. This preserves Prometheus and Grafana data.
 - If you want to wipe everything, including Grafana and Prometheus state, run `make clean`.
 

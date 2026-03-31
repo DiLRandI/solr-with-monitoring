@@ -27,43 +27,58 @@ const (
 	defaultRetryInitialBackoff = 500 * time.Millisecond
 	defaultRetryMaxBackoff     = 5 * time.Second
 	defaultRetryJitter         = 0.20
+	defaultTelemetryEnabled    = true
+	defaultOTELServiceName     = "solr-seeder"
+	defaultOTELExporterURL     = "http://localhost:4318"
+	defaultTraceSampleRatio    = 0.10
+	defaultMetricsListenAddr   = ":9464"
 )
 
 type Config struct {
-	SolrBaseURL         string
-	MoviesCore          string
-	BooksCore           string
-	MovieWorkers        int
-	BookWorkers         int
-	BatchSize           int
-	WorkerSleep         time.Duration
-	RequestTimeout      time.Duration
-	ShutdownTimeout     time.Duration
-	ProgressInterval    time.Duration
-	LogLevel            string
-	RetryAttempts       int
-	RetryInitialBackoff time.Duration
-	RetryMaxBackoff     time.Duration
-	RetryJitter         float64
+	SolrBaseURL          string
+	MoviesCore           string
+	BooksCore            string
+	MovieWorkers         int
+	BookWorkers          int
+	BatchSize            int
+	WorkerSleep          time.Duration
+	RequestTimeout       time.Duration
+	ShutdownTimeout      time.Duration
+	ProgressInterval     time.Duration
+	LogLevel             string
+	RetryAttempts        int
+	RetryInitialBackoff  time.Duration
+	RetryMaxBackoff      time.Duration
+	RetryJitter          float64
+	TelemetryEnabled     bool
+	OTELServiceName      string
+	OTELExporterURL      string
+	OTELTraceSampleRatio float64
+	MetricsListenAddr    string
 }
 
 func Load(args []string, lookupEnv func(string) (string, bool)) (Config, error) {
 	cfg := Config{
-		SolrBaseURL:         envString(lookupEnv, "SEEDER_SOLR_BASE_URL", defaultSolrBaseURL),
-		MoviesCore:          envString(lookupEnv, "SEEDER_MOVIES_CORE", defaultMoviesCore),
-		BooksCore:           envString(lookupEnv, "SEEDER_BOOKS_CORE", defaultBooksCore),
-		MovieWorkers:        envInt(lookupEnv, "SEEDER_MOVIE_WORKERS", defaultMovieWorkers),
-		BookWorkers:         envInt(lookupEnv, "SEEDER_BOOK_WORKERS", defaultBookWorkers),
-		BatchSize:           envInt(lookupEnv, "SEEDER_BATCH_SIZE", defaultBatchSize),
-		WorkerSleep:         envDuration(lookupEnv, "SEEDER_WORKER_SLEEP", defaultWorkerSleep),
-		RequestTimeout:      envDuration(lookupEnv, "SEEDER_REQUEST_TIMEOUT", defaultRequestTimeout),
-		ShutdownTimeout:     envDuration(lookupEnv, "SEEDER_SHUTDOWN_TIMEOUT", defaultShutdownTimeout),
-		ProgressInterval:    envDuration(lookupEnv, "SEEDER_PROGRESS_INTERVAL", defaultProgressInterval),
-		LogLevel:            envString(lookupEnv, "SEEDER_LOG_LEVEL", defaultLogLevel),
-		RetryAttempts:       envInt(lookupEnv, "SEEDER_RETRY_ATTEMPTS", defaultRetryAttempts),
-		RetryInitialBackoff: envDuration(lookupEnv, "SEEDER_RETRY_INITIAL_BACKOFF", defaultRetryInitialBackoff),
-		RetryMaxBackoff:     envDuration(lookupEnv, "SEEDER_RETRY_MAX_BACKOFF", defaultRetryMaxBackoff),
-		RetryJitter:         envFloat(lookupEnv, "SEEDER_RETRY_JITTER", defaultRetryJitter),
+		SolrBaseURL:          envString(lookupEnv, "SEEDER_SOLR_BASE_URL", defaultSolrBaseURL),
+		MoviesCore:           envString(lookupEnv, "SEEDER_MOVIES_CORE", defaultMoviesCore),
+		BooksCore:            envString(lookupEnv, "SEEDER_BOOKS_CORE", defaultBooksCore),
+		MovieWorkers:         envInt(lookupEnv, "SEEDER_MOVIE_WORKERS", defaultMovieWorkers),
+		BookWorkers:          envInt(lookupEnv, "SEEDER_BOOK_WORKERS", defaultBookWorkers),
+		BatchSize:            envInt(lookupEnv, "SEEDER_BATCH_SIZE", defaultBatchSize),
+		WorkerSleep:          envDuration(lookupEnv, "SEEDER_WORKER_SLEEP", defaultWorkerSleep),
+		RequestTimeout:       envDuration(lookupEnv, "SEEDER_REQUEST_TIMEOUT", defaultRequestTimeout),
+		ShutdownTimeout:      envDuration(lookupEnv, "SEEDER_SHUTDOWN_TIMEOUT", defaultShutdownTimeout),
+		ProgressInterval:     envDuration(lookupEnv, "SEEDER_PROGRESS_INTERVAL", defaultProgressInterval),
+		LogLevel:             envString(lookupEnv, "SEEDER_LOG_LEVEL", defaultLogLevel),
+		RetryAttempts:        envInt(lookupEnv, "SEEDER_RETRY_ATTEMPTS", defaultRetryAttempts),
+		RetryInitialBackoff:  envDuration(lookupEnv, "SEEDER_RETRY_INITIAL_BACKOFF", defaultRetryInitialBackoff),
+		RetryMaxBackoff:      envDuration(lookupEnv, "SEEDER_RETRY_MAX_BACKOFF", defaultRetryMaxBackoff),
+		RetryJitter:          envFloat(lookupEnv, "SEEDER_RETRY_JITTER", defaultRetryJitter),
+		TelemetryEnabled:     envBool(lookupEnv, "SEEDER_TELEMETRY_ENABLED", defaultTelemetryEnabled),
+		OTELServiceName:      envString(lookupEnv, "SEEDER_OTEL_SERVICE_NAME", defaultOTELServiceName),
+		OTELExporterURL:      envString(lookupEnv, "SEEDER_OTEL_EXPORTER_ENDPOINT", defaultOTELExporterURL),
+		OTELTraceSampleRatio: envFloat(lookupEnv, "SEEDER_OTEL_TRACE_SAMPLE_RATIO", defaultTraceSampleRatio),
+		MetricsListenAddr:    envString(lookupEnv, "SEEDER_METRICS_LISTEN_ADDR", defaultMetricsListenAddr),
 	}
 
 	fs := flag.NewFlagSet("seeder", flag.ContinueOnError)
@@ -83,6 +98,11 @@ func Load(args []string, lookupEnv func(string) (string, bool)) (Config, error) 
 	fs.DurationVar(&cfg.RetryInitialBackoff, "retry-initial-backoff", cfg.RetryInitialBackoff, "initial retry backoff")
 	fs.DurationVar(&cfg.RetryMaxBackoff, "retry-max-backoff", cfg.RetryMaxBackoff, "maximum retry backoff")
 	fs.Float64Var(&cfg.RetryJitter, "retry-jitter", cfg.RetryJitter, "retry jitter fraction")
+	fs.BoolVar(&cfg.TelemetryEnabled, "telemetry-enabled", cfg.TelemetryEnabled, "enable OpenTelemetry traces and metrics")
+	fs.StringVar(&cfg.OTELServiceName, "otel-service-name", cfg.OTELServiceName, "OpenTelemetry service name")
+	fs.StringVar(&cfg.OTELExporterURL, "otel-exporter-endpoint", cfg.OTELExporterURL, "OTLP/HTTP exporter endpoint URL")
+	fs.Float64Var(&cfg.OTELTraceSampleRatio, "otel-trace-sample-ratio", cfg.OTELTraceSampleRatio, "trace sample ratio between 0 and 1")
+	fs.StringVar(&cfg.MetricsListenAddr, "metrics-listen-addr", cfg.MetricsListenAddr, "Prometheus metrics listen address")
 
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
@@ -178,10 +198,34 @@ func (c *Config) validate() error {
 	if c.RetryJitter < 0 || c.RetryJitter > 1 {
 		return fmt.Errorf("retry jitter must be between 0 and 1")
 	}
+	if c.OTELTraceSampleRatio < 0 || c.OTELTraceSampleRatio > 1 {
+		return fmt.Errorf("OTEL trace sample ratio must be between 0 and 1")
+	}
+	if c.TelemetryEnabled {
+		if strings.TrimSpace(c.OTELServiceName) == "" {
+			return fmt.Errorf("OTEL service name must not be empty when telemetry is enabled")
+		}
+		telemetryURL, err := url.Parse(strings.TrimSpace(c.OTELExporterURL))
+		if err != nil {
+			return fmt.Errorf("invalid OTEL exporter endpoint: %w", err)
+		}
+		if telemetryURL.Scheme != "http" && telemetryURL.Scheme != "https" {
+			return fmt.Errorf("OTEL exporter endpoint must use http or https")
+		}
+		if telemetryURL.Host == "" {
+			return fmt.Errorf("OTEL exporter endpoint must include a host")
+		}
+		if strings.TrimSpace(c.MetricsListenAddr) == "" {
+			return fmt.Errorf("metrics listen address must not be empty when telemetry is enabled")
+		}
+		c.OTELExporterURL = telemetryURL.String()
+	}
 
 	c.LogLevel = strings.ToLower(c.LogLevel)
 	c.MoviesCore = strings.TrimSpace(c.MoviesCore)
 	c.BooksCore = strings.TrimSpace(c.BooksCore)
+	c.OTELServiceName = strings.TrimSpace(c.OTELServiceName)
+	c.MetricsListenAddr = strings.TrimSpace(c.MetricsListenAddr)
 	return nil
 }
 
@@ -234,6 +278,21 @@ func envFloat(lookupEnv func(string) (string, bool), key string, fallback float6
 		return fallback
 	}
 	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func envBool(lookupEnv func(string) (string, bool), key string, fallback bool) bool {
+	if lookupEnv == nil {
+		return fallback
+	}
+	value, ok := lookupEnv(key)
+	if !ok || strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
 	if err != nil {
 		return fallback
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/DiLRandI/solr-with-monitoring/app/internal/seeder/generator"
 	"github.com/DiLRandI/solr-with-monitoring/app/internal/seeder/solr"
 	"github.com/DiLRandI/solr-with-monitoring/app/internal/seeder/stats"
+	"github.com/DiLRandI/solr-with-monitoring/app/internal/seeder/telemetry"
 )
 
 type Job struct {
@@ -31,14 +32,21 @@ var newHTTPClient = func() *http.Client {
 	}
 }
 
-func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
+func Run(ctx context.Context, cfg config.Config, logger *slog.Logger, tel *telemetry.Manager) error {
 	httpClient := newHTTPClient()
+	if tel != nil {
+		httpClient.Transport = tel.WrapTransport(httpClient.Transport)
+	}
 	client := solr.NewClient(cfg.SolrBaseURL, httpClient)
 
 	movieStats := stats.NewCoreStats()
 	bookStats := stats.NewCoreStats()
 	movieJobs := make(chan Job, cfg.MovieWorkers*2)
 	bookJobs := make(chan Job, cfg.BookWorkers*2)
+	if tel != nil {
+		tel.SetQueueDepth(cfg.MoviesCore, 0)
+		tel.SetQueueDepth(cfg.BooksCore, 0)
+	}
 	logCtx, stopLogs := context.WithCancel(context.Background())
 	defer stopLogs()
 
@@ -58,6 +66,11 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		"retry_max_backoff", cfg.RetryMaxBackoff,
 		"retry_jitter", cfg.RetryJitter,
 		"progress_interval", cfg.ProgressInterval,
+		"telemetry_enabled", cfg.TelemetryEnabled,
+		"otel_service_name", cfg.OTELServiceName,
+		"otel_exporter_endpoint", cfg.OTELExporterURL,
+		"otel_trace_sample_ratio", cfg.OTELTraceSampleRatio,
+		"metrics_listen_addr", cfg.MetricsListenAddr,
 	)
 
 	var movieCounter atomic.Uint64
@@ -73,13 +86,13 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	producersWG.Add(2)
 	go func() {
 		defer producersWG.Done()
-		produce(producerCtx, logger.With("core", cfg.MoviesCore, "component", "producer"), cfg.MoviesCore, cfg.BatchSize, movieJobs, movieStats, func() any {
+		produce(producerCtx, logger.With("core", cfg.MoviesCore, "component", "producer"), cfg.MoviesCore, cfg.BatchSize, movieJobs, movieStats, tel, func() any {
 			return movieGenerator.Generate()
 		})
 	}()
 	go func() {
 		defer producersWG.Done()
-		produce(producerCtx, logger.With("core", cfg.BooksCore, "component", "producer"), cfg.BooksCore, cfg.BatchSize, bookJobs, bookStats, func() any {
+		produce(producerCtx, logger.With("core", cfg.BooksCore, "component", "producer"), cfg.BooksCore, cfg.BatchSize, bookJobs, bookStats, tel, func() any {
 			return bookGenerator.Generate()
 		})
 	}()
@@ -95,6 +108,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		client,
 		cfg,
 		movieStats,
+		tel,
 	)
 	startWorkers(
 		&workersWG,
@@ -106,6 +120,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		client,
 		cfg,
 		bookStats,
+		tel,
 	)
 
 	var progressWG sync.WaitGroup
@@ -117,6 +132,9 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 
 	<-ctx.Done()
 	logger.Info("shutdown signal received", "error", ctx.Err())
+	if tel != nil {
+		tel.RecordShutdown("signal")
+	}
 
 	stopProducers()
 	producersWG.Wait()

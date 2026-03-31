@@ -27,6 +27,7 @@ services:
       - solr-lab
     ports:
       - "13133:13133"
+      - "4318:4318"
     volumes:
       - ./observability/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
     depends_on:
@@ -161,6 +162,8 @@ services:
       - --enable-feature=exemplar-storage
     networks:
       - solr-lab
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "9090:9090"
     volumes:
